@@ -1,0 +1,23 @@
+{
+  "test_sensor_001": {
+    "server_id": "test_sensor_001",
+    "name": "Test Voltage Sensor",
+    "layer": "physical",
+    "domain": "power_grid",
+    "zone": "zone1",
+    "transport": "stdio",
+    "endpoint": "",
+    "tools": [
+      {
+        "name": "read_sensor",
+        "description": "Read voltage",
+        "input_schema": {},
+        "output_schema": {},
+        "safety_level": "read_only"
+      }
+    ],
+    "status": "active",
+    "registered_at": "2026-02-17T10:41:42.270261",
+    "last_heartbeat": "2026-02-17T10:41:42.270263"
+  }
+}

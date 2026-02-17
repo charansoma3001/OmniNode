@@ -1,0 +1,67 @@
+services:
+  emqx:
+    image: emqx/emqx:5.8
+    container_name: mcp-emqx
+    ports:
+      - "1883:1883"     # MQTT
+      - "8083:8083"     # MQTT WebSocket
+      - "18083:18083"   # EMQX Dashboard
+    environment:
+      EMQX_NAME: mcp-broker
+      EMQX_LOADED_PLUGINS: "emqx_dashboard"
+    volumes:
+      - emqx_data:/opt/emqx/data
+    networks:
+      - mcp-net
+    healthcheck:
+      test: ["CMD", "emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  influxdb:
+    image: influxdb:2.7
+    container_name: mcp-influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: mcp-prototype-2024
+      DOCKER_INFLUXDB_INIT_ORG: mcp-org
+      DOCKER_INFLUXDB_INIT_BUCKET: power_grid
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: mcp-dev-token
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    networks:
+      - mcp-net
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: mcp-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: mcp-grafana
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - mcp-net
+    depends_on:
+      influxdb:
+        condition: service_healthy
+
+volumes:
+  emqx_data:
+  influxdb_data:
+  grafana_data:
+
+networks:
+  mcp-net:
+    driver: bridge
