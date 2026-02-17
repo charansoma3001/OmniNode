@@ -38,12 +38,21 @@ async def run_cli() -> None:
     # Initialize
     print("Initializing power grid simulation...")
     grid = PowerGridSimulation()
+
+    # Create all MCP servers for live tool execution
+    from src.domains.power_grid.adapter import PowerGridAdapter
+    adapter = PowerGridAdapter()
+    sensors = adapter.create_sensors(grid)
+    actuators = adapter.create_actuators(grid)
+    coordinators = adapter.create_coordinators(grid)
+    all_servers = [*sensors, *actuators, *coordinators]
+
     memory = ContextMemory()
-    agent = StrategicAgent(memory=memory)
+    agent = StrategicAgent(memory=memory, servers=all_servers)
 
     print("Discovering MCP tools...")
     tool_count = await agent.discover_tools()
-    print(f"  → {tool_count} tools discovered\n")
+    print(f"  → {tool_count} tools discovered ({len(all_servers)} live servers)\n")
 
     monitor = MonitoringLoop(grid, agent)
     monitor_task: asyncio.Task | None = None

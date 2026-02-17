@@ -1,8 +1,8 @@
 """Zone/Substation Coordinator MCP Server.
 
 Each zone coordinator manages a subset of buses/lines and provides:
-- Local optimization
-- Violation handling
+- Local optimization with its own LLM brain
+- Autonomous violation handling
 - Inter-zone coordination
 """
 
@@ -19,6 +19,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 from src.common.config import get_settings
+from src.common.llm_client import LLMClient, create_coordinator_llm
 from src.common.models import (
     MCPServerRegistration,
     SafetyLevel,
@@ -44,6 +45,7 @@ class ZoneCoordinator:
         grid: PowerGridSimulation,
         buses: list[int],
         lines: list[int],
+        llm: LLMClient | None = None,
     ):
         self.zone_id = zone_id
         self.grid = grid
@@ -53,6 +55,9 @@ class ZoneCoordinator:
         self.name = f"Zone Coordinator ({zone_id})"
         self.optimizer = ZoneOptimizer(grid, zone_id, buses, lines)
         self._peer_states: dict[str, dict] = {}
+
+        # Each coordinator gets its own LLM brain
+        self.llm = llm or create_coordinator_llm(zone_id)
 
         self.mcp = Server(self.name)
         self._register_tools()
@@ -129,6 +134,13 @@ class ZoneCoordinator:
                     description=f"Scan {self.zone_id} for constraint violations",
                     inputSchema={"type": "object", "properties": {}},
                 ),
+                Tool(
+                    name="analyze_and_act",
+                    description=f"Use the zone's local LLM to analyze current state and autonomously take corrective action in {self.zone_id}",
+                    inputSchema={"type": "object", "properties": {
+                        "situation": {"type": "string", "description": "Optional description of what to analyze"},
+                    }},
+                ),
             ]
 
         @self.mcp.call_tool()
@@ -148,6 +160,8 @@ class ZoneCoordinator:
                     result = self._emergency_island(arguments.get("reason", ""))
                 elif name == "detect_violations":
                     result = self._detect_violations()
+                elif name == "analyze_and_act":
+                    result = self._llm_analyze(arguments.get("situation", ""))
                 else:
                     result = {"error": f"Unknown tool: {name}"}
                 return [TextContent(type="text", text=json.dumps(result, default=str))]
@@ -262,6 +276,43 @@ class ZoneCoordinator:
         }
 
     # ------------------------------------------------------------------
+    # LLM-powered analysis (zone-local agent)
+    # ------------------------------------------------------------------
+
+    def _llm_analyze(self, situation: str = "") -> dict:
+        """Use the zone's local LLM to analyze current state and recommend actions."""
+        status = self._get_zone_status()
+        violations = self._detect_violations()
+
+        prompt = f"""Analyze the current state of {self.zone_id} and recommend corrective actions.
+
+Zone Status:
+{json.dumps(status, indent=2, default=str)}
+
+Violations:
+{json.dumps(violations, indent=2, default=str)}
+
+{f'Situation: {situation}' if situation else ''}
+
+Respond with:
+1. Assessment of zone health (1-2 sentences)
+2. Recommended actions (be specific: which buses, which controls)
+3. Whether the strategic agent needs to be involved (yes/no)"""
+
+        try:
+            response = self.llm.complete(prompt, temperature=0.3)
+            return {
+                "zone": self.zone_id,
+                "model": self.llm.model,
+                "analysis": response,
+                "violations_count": violations.get("count", 0),
+                "autonomous": True,
+            }
+        except Exception as e:
+            logger.error("LLM analysis failed for %s: %s", self.zone_id, e)
+            return {"zone": self.zone_id, "error": str(e), "autonomous": False}
+
+    # ------------------------------------------------------------------
     # Registry
     # ------------------------------------------------------------------
 
@@ -274,6 +325,7 @@ class ZoneCoordinator:
             ToolDescriptor(name="voltage_regulation", description="Voltage control", safety_level=SafetyLevel.MEDIUM_RISK),
             ToolDescriptor(name="emergency_islanding", description="Zone isolation", safety_level=SafetyLevel.HIGH_RISK),
             ToolDescriptor(name="detect_violations", description="Violation scan", safety_level=SafetyLevel.READ_ONLY),
+            ToolDescriptor(name="analyze_and_act", description="LLM-powered autonomous analysis", safety_level=SafetyLevel.READ_ONLY),
         ]
         return MCPServerRegistration(
             server_id=self.server_id,

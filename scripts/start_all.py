@@ -1,4 +1,12 @@
-"""Startup script to launch all MCP servers and services."""
+"""Startup script — launches the full multi-agent MCP system.
+
+Agent roster:
+  • 1× Strategic Agent  (configurable model, e.g. qwen3-coder:30b)
+  • 3× Zone Coordinators (each with its own LLM, e.g. qwen3:4b)
+  • 1× Safety Guardian   (e.g. llama-guard3)
+  • 11 Sensor MCP servers
+  • 5  Actuator MCP servers
+"""
 
 from __future__ import annotations
 
@@ -12,6 +20,7 @@ from src.simulation.power_grid import PowerGridSimulation
 from src.simulation.data_generator import DataGenerator
 from src.domains.power_grid.adapter import PowerGridAdapter
 from src.strategic.agent import StrategicAgent
+from src.strategic.guardian import SafetyGuardian
 from src.strategic.memory import ContextMemory
 from src.strategic.monitor import MonitoringLoop
 
@@ -23,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
+    settings = get_settings()
     logger.info("=" * 60)
     logger.info("  MCP Multi-Agent Power Grid System — Starting Up")
     logger.info("=" * 60)
@@ -45,11 +55,13 @@ async def main() -> None:
     actuators = adapter.create_actuators(grid)
     logger.info("  ✓ Created %d actuator MCP servers", len(actuators))
 
-    # 5. Create coordinators
+    # 5. Create coordinators (each gets its own LLM brain automatically)
     coordinators = adapter.create_coordinators(grid)
-    logger.info("  ✓ Created %d coordinator MCP servers", len(coordinators))
+    logger.info("  ✓ Created %d zone coordinator agents", len(coordinators))
+    for coord in coordinators:
+        logger.info("    • %s → model=%s", coord.name, coord.llm.model)
 
-    # 6. Register all servers
+    # 6. Register all servers with the MCP Registry
     logger.info("Registering with MCP Registry...")
     for server in [*sensors, *actuators, *coordinators]:
         try:
@@ -57,23 +69,38 @@ async def main() -> None:
         except Exception as e:
             logger.warning("  Failed to register %s: %s", server.name, e)
 
-    # 7. Initialize strategic agent
-    logger.info("Initializing strategic agent...")
-    memory = ContextMemory()
-    agent = StrategicAgent(memory=memory)
-    tool_count = await agent.discover_tools()
-    logger.info("  ✓ Agent discovered %d tools", tool_count)
+    # 7. Initialize Safety Guardian
+    logger.info("Initializing Safety Guardian agent...")
+    guardian = SafetyGuardian()
+    logger.info("  ✓ Guardian → model=%s", guardian.llm.model)
 
-    # 8. Start monitoring loop
-    logger.info("Starting monitoring loop (interval=%ds)...", get_settings().monitor_interval_seconds)
+    # 8. Initialize strategic agent (with live server references for direct tool execution)
+    logger.info("Initializing Strategic Agent...")
+    all_servers = [*sensors, *actuators, *coordinators]
+    memory = ContextMemory()
+    agent = StrategicAgent(memory=memory, servers=all_servers)
+    logger.info("  ✓ Strategic Agent → model=%s", agent.llm.model)
+    tool_count = await agent.discover_tools()
+    logger.info("  ✓ Agent discovered %d tools (%d with live servers)", tool_count, len(all_servers))
+
+    # 9. Start monitoring loop
+    logger.info("Starting monitoring loop (interval=%ds)...", settings.monitor_interval_seconds)
     monitor = MonitoringLoop(grid, agent, DataGenerator(grid))
 
+    # --- Summary ---
     logger.info("")
     logger.info("=" * 60)
-    logger.info("  System ready! %d MCP servers, %d tools",
+    logger.info("  ✅ System ready!  Multi-Agent Roster:")
+    logger.info("  ┌──────────────────────────────────────────────────────┐")
+    logger.info("  │  Strategic Agent  │ model: %-25s │", settings.strategic_model)
+    logger.info("  │  Zone 1 Agent     │ model: %-25s │", settings.zone1_model)
+    logger.info("  │  Zone 2 Agent     │ model: %-25s │", settings.zone2_model)
+    logger.info("  │  Zone 3 Agent     │ model: %-25s │", settings.zone3_model)
+    logger.info("  │  Safety Guardian  │ model: %-25s │", settings.guardian_model)
+    logger.info("  └──────────────────────────────────────────────────────┘")
+    logger.info("  MCP servers: %d  │  Tools: %d",
                 len(sensors) + len(actuators) + len(coordinators), tool_count)
     logger.info("  Run 'mcp-cli' in another terminal for interactive control")
-    logger.info("  Run 'mcp-dashboard' for the monitoring dashboard")
     logger.info("=" * 60)
 
     # Handle shutdown

@@ -1,7 +1,8 @@
-"""Strategic LLM Agent — Claude as MCP Client.
+"""Strategic LLM Agent — Multi-Agent Coordinator.
 
 Discovers tools from the registry, reasons over the grid state,
 and executes multi-step action plans via natural language.
+Routes tool calls to ACTUAL server objects (sensors, actuators, coordinators).
 """
 
 from __future__ import annotations
@@ -12,10 +13,10 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-import anthropic
 import httpx
 
 from src.common.config import get_settings
+from src.common.llm_client import LLMClient, create_strategic_llm
 from src.common.models import AgentDecision
 from src.strategic.memory import ContextMemory
 
@@ -27,18 +28,34 @@ class StrategicAgent:
 
     On startup, discovers all available tools from the MCP Registry.
     Converts natural language commands into tool invocations.
-    Maintains context memory for decision continuity.
+    Routes tool calls to actual in-process server objects.
     """
 
-    def __init__(self, memory: ContextMemory | None = None):
+    def __init__(
+        self,
+        memory: ContextMemory | None = None,
+        llm: LLMClient | None = None,
+        servers: list | None = None,
+    ):
         settings = get_settings()
-        self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        self.model = settings.agent_model
+        self.llm = llm or create_strategic_llm()
         self.memory = memory or ContextMemory()
         self._registry_url = settings.registry_url
         self._tools: list[dict] = []
-        self._tool_server_map: dict[str, str] = {}  # tool_name -> server_id
+        self._tool_server_map: dict[str, str] = {}     # clean_tool_name -> server_id
+        self._tool_name_map: dict[str, str] = {}        # clean_tool_name -> original tool name
+        self._server_objects: dict[str, Any] = {}        # server_id -> server object
         self._audit_log: list[AgentDecision] = []
+
+        # Register live server objects for direct tool execution
+        if servers:
+            for server in servers:
+                self._server_objects[server.server_id] = server
+
+        logger.info(
+            "Strategic agent initialized → model=%s  servers=%d",
+            self.llm.model, len(self._server_objects),
+        )
 
     # ------------------------------------------------------------------
     # Tool discovery
@@ -57,18 +74,34 @@ class StrategicAgent:
 
         self._tools = []
         self._tool_server_map = {}
+        self._tool_name_map = {}
 
         for tool in raw_tools:
-            # Convert to Anthropic tool format
-            anthropic_tool = {
-                "name": f"{tool['server_name']}_{tool['name']}".replace(" ", "_").replace("(", "").replace(")", "").lower(),
-                "description": f"[{tool['layer']}/{tool.get('zone', 'system')}] {tool['description']}",
-                "input_schema": tool.get("input_schema", {"type": "object", "properties": {}}),
-            }
-            self._tools.append(anthropic_tool)
-            self._tool_server_map[anthropic_tool["name"]] = tool["server_id"]
+            clean_name = (
+                f"{tool['server_name']}_{tool['name']}"
+                .replace(" ", "_").replace("(", "").replace(")", "").lower()
+            )
+            original_name = tool["name"]
 
-        logger.info("Discovered %d tools from %d servers", len(self._tools), len(set(self._tool_server_map.values())))
+            tool_def = {
+                "type": "function",
+                "function": {
+                    "name": clean_name,
+                    "description": f"[{tool['layer']}/{tool.get('zone', 'system')}] {tool['description']}",
+                    "parameters": tool.get(
+                        "input_schema",
+                        {"type": "object", "properties": {}, "required": []},
+                    ),
+                },
+            }
+            self._tools.append(tool_def)
+            self._tool_server_map[clean_name] = tool["server_id"]
+            self._tool_name_map[clean_name] = original_name
+
+        logger.info(
+            "Discovered %d tools from %d servers",
+            len(self._tools), len(set(self._tool_server_map.values())),
+        )
         return len(self._tools)
 
     # ------------------------------------------------------------------
@@ -76,125 +109,128 @@ class StrategicAgent:
     # ------------------------------------------------------------------
 
     async def query(self, user_message: str) -> str:
-        """Process a natural language query and return the agent's response.
-
-        The agent may invoke multiple tools to answer the query.
-        """
-        # Build context from memory
+        """Process a natural language query and return the agent's response."""
         recent_decisions = self.memory.get_recent_decisions(5)
         context_summary = self.memory.get_context_summary()
+        context_block = self._build_context(context_summary, recent_decisions)
 
-        system_prompt = self._build_system_prompt(context_summary, recent_decisions)
+        full_message = f"{context_block}\n\n{user_message}" if context_block else user_message
 
-        messages = [{"role": "user", "content": user_message}]
+        final_text = await self.llm.tool_loop(
+            user_message=full_message,
+            tools=self._tools,
+            tool_executor=self._execute_tool,
+        )
 
-        # Iterative tool-use loop
-        max_iterations = 10
-        for iteration in range(max_iterations):
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                system=system_prompt,
-                tools=self._tools if self._tools else None,
-                messages=messages,
-            )
+        decision = AgentDecision(
+            decision_id=uuid.uuid4().hex[:12],
+            trigger=user_message,
+            reasoning=final_text[:500],
+        )
+        self._audit_log.append(decision)
+        self.memory.store_decision(decision)
 
-            # Check if we need to handle tool calls
-            if response.stop_reason == "tool_use":
-                # Extract tool use blocks
-                tool_results = []
-                for block in response.content:
-                    if block.type == "tool_use":
-                        tool_result = await self._execute_tool(block.name, block.input)
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": json.dumps(tool_result, default=str),
-                        })
-
-                # Add assistant response and tool results to messages
-                messages.append({"role": "assistant", "content": response.content})
-                messages.append({"role": "user", "content": tool_results})
-            else:
-                # Final text response
-                final_text = ""
-                for block in response.content:
-                    if hasattr(block, "text"):
-                        final_text += block.text
-
-                # Log decision
-                decision = AgentDecision(
-                    decision_id=uuid.uuid4().hex[:12],
-                    trigger=user_message,
-                    reasoning=final_text[:500],
-                )
-                self._audit_log.append(decision)
-                self.memory.store_decision(decision)
-
-                return final_text
-
-        return "Max iterations reached. The query may be too complex."
+        return final_text
 
     async def _execute_tool(self, tool_name: str, arguments: dict) -> dict:
-        """Execute a tool call (placeholder — actual execution goes through MCP).
+        """Execute a tool call by routing to the actual in-process server object."""
+        logger.info("Tool call: %s(%s)", tool_name, json.dumps(arguments, default=str)[:200])
 
-        In the full system, this routes to the appropriate MCP server.
-        For the prototype, we return a simulated response.
-        """
-        logger.info("Tool call: %s(%s)", tool_name, json.dumps(arguments)[:200])
-
-        # Route to appropriate server via registry
         server_id = self._tool_server_map.get(tool_name)
+        original_name = self._tool_name_map.get(tool_name, tool_name)
+
         if not server_id:
             return {"error": f"Tool '{tool_name}' not found in registry"}
 
-        # Placeholder: in production, this would invoke the MCP server's tool
-        return {
-            "status": "executed",
-            "tool": tool_name,
-            "server_id": server_id,
-            "arguments": arguments,
-            "result": "Tool execution routed to MCP server",
-        }
+        # Look up the actual server object
+        server = self._server_objects.get(server_id)
+        if not server:
+            logger.warning("No live server for %s (%s), returning stub", tool_name, server_id)
+            return {
+                "status": "no_live_server",
+                "tool": tool_name,
+                "server_id": server_id,
+                "message": "Server not available for direct execution",
+            }
+
+        # Call the server's tool handler directly
+        try:
+            # All our servers register tools via MCP's call_tool decorator.
+            # We invoke them through the server's internal methods.
+            result = self._call_server_tool(server, original_name, arguments)
+            logger.info("Tool result [%s]: %s", tool_name, json.dumps(result, default=str)[:300])
+            return result
+        except Exception as e:
+            logger.error("Tool execution failed [%s]: %s", tool_name, e)
+            return {"error": str(e), "tool": tool_name}
+
+    def _call_server_tool(self, server: Any, tool_name: str, arguments: dict) -> dict:
+        """Route a tool call to the correct handler method on the server object.
+
+        Handles sensors, actuators, and coordinators by inspecting
+        the server type and calling the appropriate internal method.
+        """
+        # ---- Zone Coordinator ----
+        if hasattr(server, "zone_id"):
+            if tool_name == "get_zone_status":
+                return server._get_zone_status()
+            elif tool_name == "optimize_zone_topology":
+                return server.optimizer.optimize(arguments.get("objective", "min_losses"))
+            elif tool_name == "handle_violation":
+                return server._handle_violation(arguments)
+            elif tool_name == "load_balancing":
+                return server.optimizer.balance_loading(arguments.get("target_balance", 80))
+            elif tool_name == "voltage_regulation":
+                return server.optimizer.regulate_voltage(arguments.get("target_pu", 1.0))
+            elif tool_name == "emergency_islanding":
+                return server._emergency_island(arguments.get("reason", ""))
+            elif tool_name == "detect_violations":
+                return server._detect_violations()
+            elif tool_name == "analyze_and_act":
+                # THIS triggers the zone's own LLM!
+                return server._llm_analyze(arguments.get("situation", ""))
+
+        # ---- Sensor ----
+        if hasattr(server, "sensor_type"):
+            if tool_name == "read_sensor":
+                return server._handle_read(arguments.get("sensor_id", ""))
+            elif tool_name == "read_sensors_batch":
+                return server._handle_batch_read(arguments.get("sensor_ids", []))
+            elif tool_name == "list_sensors":
+                return {"sensors": server._get_sensor_ids(), "type": server.sensor_type, "zone": server.zone}
+            elif tool_name == "set_threshold":
+                return server._handle_set_threshold(arguments)
+            elif tool_name == "get_metadata":
+                return server._get_sensor_metadata(arguments.get("sensor_id", ""))
+
+        # ---- Actuator ----
+        if hasattr(server, "device_type"):
+            if tool_name == "control":
+                return server._handle_control(arguments)
+            elif tool_name == "validate_action":
+                return server._handle_validate(arguments)
+            elif tool_name == "get_status":
+                return server._get_device_status(arguments.get("device_id", ""))
+            elif tool_name == "list_devices":
+                return {"devices": server._get_device_ids(), "type": server.device_type, "zone": server.zone}
+            elif tool_name == "emergency_shutdown":
+                return server._handle_emergency(arguments.get("zone_id", ""))
+
+        return {"error": f"Unknown tool '{tool_name}' on server {server.name}"}
 
     # ------------------------------------------------------------------
-    # System prompt
+    # Context
     # ------------------------------------------------------------------
 
-    def _build_system_prompt(self, context: str, recent_decisions: list[dict]) -> str:
-        decisions_text = ""
+    def _build_context(self, context: str, recent_decisions: list[dict]) -> str:
+        parts = []
+        if context:
+            parts.append(context)
         if recent_decisions:
-            decisions_text = "\n\nRecent decisions:\n" + json.dumps(recent_decisions[:3], indent=2, default=str)
-
-        return f"""You are a strategic power grid management agent. You monitor and control
-a simulated IEEE 30-bus power grid through MCP tools.
-
-Your responsibilities:
-1. Monitor grid health (voltages, line loadings, frequency, temperatures)
-2. Detect and respond to violations (voltage limits, thermal limits, frequency deviation)
-3. Optimize grid operation (minimize losses, balance loading)
-4. Execute natural language commands from operators
-5. Explain your reasoning clearly
-
-Safety rules:
-- Always validate actuations before executing (use validate_action tools)
-- For HIGH_RISK actions, explain the consequences before proceeding
-- Never bypass safety checks
-- Log all decisions for audit
-
-Grid zones:
-- Zone 1: Buses 0-9 (generation-heavy)
-- Zone 2: Buses 10-19 (mixed)
-- Zone 3: Buses 20-29 (load-heavy)
-
-Normal operating limits:
-- Voltage: 0.95 - 1.05 p.u.
-- Line loading: < 100%
-- Frequency: 59.5 - 60.5 Hz
-- Transformer temperature: < 85°C (alarm), < 105°C (trip)
-
-{context}
-{decisions_text}"""
+            parts.append(
+                "Recent decisions:\n" + json.dumps(recent_decisions[:3], indent=2, default=str)
+            )
+        return "\n\n".join(parts)
 
     # ------------------------------------------------------------------
     # Audit
