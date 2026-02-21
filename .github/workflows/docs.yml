@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - ollama
   workflow_dispatch:
 
 permissions:
