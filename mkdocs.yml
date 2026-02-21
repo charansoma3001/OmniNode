@@ -1,5 +1,8 @@
 site_name: MCP Multi-Agent System
 site_description: MCP-Based Multi-Agent System for Power Grid & Beyond
+site_url: https://charansoma3001.github.io/OmniNode/
+repo_url: https://github.com/charansoma3001/OmniNode
+
 theme:
   name: material
   features:
