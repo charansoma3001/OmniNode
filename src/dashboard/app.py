@@ -108,7 +108,25 @@ app.layout = html.Div(
     [Input("interval", "n_intervals")],
 )
 def update_dashboard(n):
-    grid.run_power_flow()
+    # Try to load external state first (from CLI scenarios)
+    import os
+    import time
+    
+    state_file = "grid_state.json"
+    loaded = False
+    if os.path.exists(state_file):
+        try:
+            import pandapower as pp
+            # Load external state blindly to sync with CLI
+            grid.net = pp.from_json(state_file, convert=True)
+            grid.run_power_flow()
+            loaded = True
+        except Exception as e:
+            logger.error("Failed to load grid state: %s", e)
+
+    if not loaded:
+        # Fallback to internal simulation
+        grid.run_power_flow()
 
     # KPIs
     total_gen = grid.get_total_generation()

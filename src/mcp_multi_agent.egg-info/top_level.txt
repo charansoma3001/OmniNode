@@ -1,6 +1,7 @@
 __init__
 common
 coordination
+dashboard
 domains
 physical
 registry

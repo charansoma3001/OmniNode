@@ -53,15 +53,20 @@ class LLMClient:
 
     def complete(self, user_message: str, *, temperature: float = 0.3) -> str:
         """Single-turn completion with no tool calling."""
+        settings = get_settings()
         messages = []
         if self.system_prompt:
             messages.append({"role": "system", "content": self.system_prompt})
         messages.append({"role": "user", "content": user_message})
 
+        # Ollama-specific options via OpenAI-compatible API
+        extra_body = {"options": {"num_ctx": settings.llm_context_window}}
+
         resp = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
             temperature=temperature,
+            extra_body=extra_body,
         )
         return resp.choices[0].message.content or ""
 
@@ -85,16 +90,21 @@ class LLMClient:
             tool_executor: async callable(tool_name, arguments) -> dict
             max_iterations: Safety cap on tool-call rounds.
         """
+        settings = get_settings()
         messages = []
         if self.system_prompt:
             messages.append({"role": "system", "content": self.system_prompt})
         messages.append({"role": "user", "content": user_message})
+
+        # Ollama-specific options
+        extra_body = {"options": {"num_ctx": settings.llm_context_window}}
 
         for _iteration in range(max_iterations):
             resp = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 tools=tools if tools else None,
+                extra_body=extra_body,
             )
             msg = resp.choices[0].message
 
@@ -160,19 +170,24 @@ You coordinate 3 zone agents and make system-wide decisions.
 
 Your responsibilities:
 1. Analyze cross-zone violations that individual zones cannot resolve alone
-2. Dispatch commands to zone coordinator agents
+2. Dispatch commands to zone coordinator agents (e.g., zone1_handle_violation, zone2_load_balancing)
 3. Approve or reject HIGH_RISK actions proposed by zone agents
 4. Optimize system-wide objectives (loss minimization, stability)
 
 You have access to tools from all zones. When you call a tool, the actual
 MCP server executes the action on the digital twin.
 
+CRITICAL INSTRUCTION:
+You must EXECUTE the necessary tool calls to resolve these issues.
+Do NOT just recommend actions in text. CALL THE TOOLS.
+If you see a violation, FIX IT using the available tools.
+
 Operating limits:
 - Voltage: 0.95 – 1.05 p.u.
 - Line loading: < 100%
 - Frequency: 59.5 – 60.5 Hz
 
-Always explain your reasoning before taking action."""
+Explain your reasoning briefly, then IMMEDIATELY call the tools."""
 
 
 def _coordinator_prompt(zone_id: str) -> str:
@@ -191,6 +206,7 @@ Your responsibilities:
 4. Escalate cross-zone issues to the strategic agent
 
 You are a FAST agent — respond concisely and act decisively.
+If you identify a violation, specify the action clearly so the system can execute it.
 Focus only on your zone. Do not speculate about other zones."""
 
 

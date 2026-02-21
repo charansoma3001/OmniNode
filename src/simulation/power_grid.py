@@ -44,6 +44,9 @@ class PowerGridSimulation:
             pp.create_shunt(self.net, bus=24, q_mvar=-5.0, p_mw=0.0, name="CapBank_Zone2")
             pp.create_shunt(self.net, bus=29, q_mvar=-5.0, p_mw=0.0, name="CapBank_Zone3")
 
+        # Set realistic line limits (default 1.0 kA)
+        self.net.line["max_i_ka"] = 1.0
+
         # Run initial power flow
         self.run_power_flow()
         logger.info(
@@ -175,7 +178,7 @@ class PowerGridSimulation:
         loads_at_bus = self.net.load[self.net.load.bus == bus_id]
         if len(loads_at_bus) > 0:
             load_id = loads_at_bus.index[0]
-            self.net.load.p_mw.at[load_id] += delta_mw
+            self.net.load.loc[load_id, 'p_mw'] += delta_mw
         else:
             pp.create_load(self.net, bus=bus_id, p_mw=delta_mw, q_mvar=delta_mw * 0.3)
         self.run_power_flow()
@@ -198,6 +201,14 @@ class PowerGridSimulation:
         )
         self._snapshots.append(snapshot)
         return len(self._snapshots) - 1
+
+    def save_to_file(self, path: str = "grid_state.json") -> None:
+        """Save current grid state to a JSON file (for dashboard sync)."""
+        import os
+        # Atomic write to avoid partial reads
+        temp_path = f"{path}.tmp"
+        pp.to_json(self.net, temp_path)
+        os.replace(temp_path, path)
 
     def restore_snapshot(self, index: int) -> bool:
         """Restore grid state from a snapshot."""

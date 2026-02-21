@@ -19,7 +19,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 from src.common.config import get_settings
-from src.common.llm_client import LLMClient, create_coordinator_llm
+from src.common.mqtt_client import MQTTClient
 from src.common.models import (
     MCPServerRegistration,
     SafetyLevel,
@@ -28,6 +28,7 @@ from src.common.models import (
 )
 from src.simulation.power_grid import PowerGridSimulation
 from src.coordination.optimizer import ZoneOptimizer
+from src.coordination.audit import ZoneAuditLogger
 
 logger = logging.getLogger(__name__)
 
@@ -44,20 +45,27 @@ class ZoneCoordinator:
         zone_id: str,
         grid: PowerGridSimulation,
         buses: list[int],
-        lines: list[int],
-        llm: LLMClient | None = None,
+        lines: list[int]
     ):
         self.zone_id = zone_id
         self.grid = grid
         self.buses = buses
         self.lines = lines
         self.server_id = f"coordinator_{zone_id}_{uuid.uuid4().hex[:8]}"
-        self.name = f"Zone Coordinator ({zone_id})"
+        self.name = f"Zone Coordinator PLC ({zone_id})"
         self.optimizer = ZoneOptimizer(grid, zone_id, buses, lines)
-        self._peer_states: dict[str, dict] = {}
-
-        # Each coordinator gets its own LLM brain
-        self.llm = llm or create_coordinator_llm(zone_id)
+        self.audit_log = ZoneAuditLogger()
+        self.mqtt: MQTTClient | None = None
+        
+        # Deterministic Protection Thresholds (adjustable via MCP)
+        self.protection_settings = {
+            "under_voltage_pu": 0.95,
+            "over_voltage_pu": 1.05,
+            "max_line_loading_pct": 100.0,
+        }
+        
+        # State tracking for deadband/escalation
+        self._consecutive_violations = 0
 
         self.mcp = Server(self.name)
         self._register_tools()
@@ -135,11 +143,21 @@ class ZoneCoordinator:
                     inputSchema={"type": "object", "properties": {}},
                 ),
                 Tool(
-                    name="analyze_and_act",
-                    description=f"Use the zone's local LLM to analyze current state and autonomously take corrective action in {self.zone_id}",
-                    inputSchema={"type": "object", "properties": {
-                        "situation": {"type": "string", "description": "Optional description of what to analyze"},
-                    }},
+                    name="execute_safety_rules",
+                    description=f"Evaluate deterministic IEC 60255 protection rules for {self.zone_id} and execute hardware actions",
+                    inputSchema={"type": "object", "properties": {}},
+                ),
+                Tool(
+                    name="update_protection_settings",
+                    description=f"Update protection relay trip thresholds for {self.zone_id}",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "under_voltage_pu": {"type": "number", "description": "Trip threshold for under-voltage"},
+                            "over_voltage_pu": {"type": "number", "description": "Trip threshold for over-voltage"},
+                            "max_line_loading_pct": {"type": "number", "description": "Trip threshold for thermal overload"},
+                        },
+                    },
                 ),
             ]
 
@@ -160,8 +178,13 @@ class ZoneCoordinator:
                     result = self._emergency_island(arguments.get("reason", ""))
                 elif name == "detect_violations":
                     result = self._detect_violations()
-                elif name == "analyze_and_act":
-                    result = self._llm_analyze(arguments.get("situation", ""))
+                elif name == "execute_safety_rules":
+                    result = self._evaluate_safety_rules()
+                elif name == "update_protection_settings":
+                    self.protection_settings.update({k: v for k, v in arguments.items() if v is not None})
+                    self.audit_log.log_event(self.zone_id, "SETTINGS_UPDATED", "Protection thresholds revised", details=self.protection_settings)
+                    self._broadcast_state("settings_updated", self.protection_settings)
+                    result = {"status": "success", "settings": self.protection_settings}
                 else:
                     result = {"error": f"Unknown tool: {name}"}
                 return [TextContent(type="text", text=json.dumps(result, default=str))]
@@ -216,18 +239,18 @@ class ZoneCoordinator:
         for b in self.buses:
             try:
                 vm = self.grid.get_bus_voltage(b)
-                if vm < 0.95:
-                    violations.append({"type": "voltage_low", "bus": b, "value": round(vm, 4), "limit": 0.95})
-                elif vm > 1.05:
-                    violations.append({"type": "voltage_high", "bus": b, "value": round(vm, 4), "limit": 1.05})
+                if vm < self.protection_settings["under_voltage_pu"]:
+                    violations.append({"type": "voltage_low", "bus": b, "value": round(vm, 4), "limit": self.protection_settings["under_voltage_pu"]})
+                elif vm > self.protection_settings["over_voltage_pu"]:
+                    violations.append({"type": "voltage_high", "bus": b, "value": round(vm, 4), "limit": self.protection_settings["over_voltage_pu"]})
             except (KeyError, IndexError):
                 pass
 
         for lid in self.lines:
             try:
                 loading = float(self.grid.net.res_line.loading_percent.at[lid])
-                if loading > 100:
-                    violations.append({"type": "thermal", "line": lid, "value": round(loading, 2), "limit": 100})
+                if loading > self.protection_settings["max_line_loading_pct"]:
+                    violations.append({"type": "thermal", "line": lid, "value": round(loading, 2), "limit": self.protection_settings["max_line_loading_pct"]})
             except (KeyError, IndexError):
                 pass
 
@@ -276,41 +299,99 @@ class ZoneCoordinator:
         }
 
     # ------------------------------------------------------------------
-    # LLM-powered analysis (zone-local agent)
+    # Deterministic PLC Logic (IEC 60255 Emulation)
     # ------------------------------------------------------------------
 
-    def _llm_analyze(self, situation: str = "") -> dict:
-        """Use the zone's local LLM to analyze current state and recommend actions."""
+    def _evaluate_safety_rules(self) -> dict:
+        """Deterministic rule engine executing hard-coded safety logic."""
         status = self._get_zone_status()
         violations = self._detect_violations()
-
-        prompt = f"""Analyze the current state of {self.zone_id} and recommend corrective actions.
-
-Zone Status:
-{json.dumps(status, indent=2, default=str)}
-
-Violations:
-{json.dumps(violations, indent=2, default=str)}
-
-{f'Situation: {situation}' if situation else ''}
-
-Respond with:
-1. Assessment of zone health (1-2 sentences)
-2. Recommended actions (be specific: which buses, which controls)
-3. Whether the strategic agent needs to be involved (yes/no)"""
-
-        try:
-            response = self.llm.complete(prompt, temperature=0.3)
+        v_list = violations.get("violations", [])
+        
+        actions_taken = []
+        events_logged = []
+        escalate = False
+        
+        if violations["count"] > 0:
+            self._consecutive_violations += 1
+        else:
+            self._consecutive_violations = 0
+            
+        topics = []
+            
+        # Rule 4: Strategic Escalation Deadband
+        if self._consecutive_violations >= 3:
+            msg = f"Escalating: Unable to resolve {violations['count']} violations after 3 cycles."
+            self.audit_log.log_event(self.zone_id, "ESCALATION", msg, details=violations)
+            self._broadcast_state("escalation", {"violations": violations})
             return {
                 "zone": self.zone_id,
-                "model": self.llm.model,
-                "analysis": response,
-                "violations_count": violations.get("count", 0),
-                "autonomous": True,
+                "status": "escalation_required",
+                "violations": violations,
+                "message": msg
             }
+
+        # Rule 1 & Rule 2: Voltage Protection (ANSI 27 & 59 / IEC 60255-127)
+        if any(v["type"] in ("voltage_low", "voltage_high") for v in v_list):
+            msg = "IEC 60255-127 Voltage Relay Triggered."
+            result = self.optimizer.regulate_voltage(1.0)
+            act = "Capacitor banks switched to regulate voltage."
+            actions_taken.append({"action": "voltage_regulation", "result": result})
+            self.audit_log.log_event(self.zone_id, "RELAY_TRIP", msg, action_taken=act, details=result)
+            topics.append("relay_trip")
+            events_logged.append(msg)
+
+        # Rule 3: Thermal Overload (ANSI 50/51 / IEC 60255-151)
+        if any(v["type"] == "thermal" for v in v_list):
+            msg = "IEC 60255-151 Overcurrent Relay Triggered."
+            # Shed load dynamically, aiming for 95% of limit to create buffer
+            target = self.protection_settings["max_line_loading_pct"] * 0.95
+            result = self.optimizer.balance_loading(target)
+            act = f"Local demand response triggered (Target: {target}%)."
+            actions_taken.append({"action": "thermal_protection", "result": result})
+            self.audit_log.log_event(self.zone_id, "RELAY_TRIP", msg, action_taken=act, details=result)
+            topics.append("relay_trip")
+            events_logged.append(msg)
+
+        post_violations = self._detect_violations()
+        
+        result_payload = {
+            "zone": self.zone_id,
+            "violations_before": violations.get("count", 0),
+            "violations_after": post_violations.get("count", 0),
+            "actions_taken": actions_taken,
+            "events": events_logged,
+            "mode": "deterministic_plc",
+        }
+        
+        # Broadcast status updates
+        self._broadcast_state("status", self._get_zone_status())
+        for topic in topics:
+            self._broadcast_state(topic, result_payload)
+
+        return result_payload
+
+    # ------------------------------------------------------------------
+    # MQTT Communication
+    # ------------------------------------------------------------------
+    
+    def _broadcast_state(self, topic_suffix: str, payload: dict) -> None:
+        """Broadcast an event or state over MQTT to all subscribers."""
+        if not self.mqtt:
+            return
+        
+        topic = f"grid/{self.zone_id}/{topic_suffix}"
+        
+        # We fire and forget asynchronously in the background
+        import asyncio
+        asyncio.create_task(self._publish_async(topic, payload))
+        
+    async def _publish_async(self, topic: str, payload: dict) -> None:
+        try:
+            msg = json.dumps(payload, default=str)
+            await self.mqtt.publish(topic, msg)
         except Exception as e:
-            logger.error("LLM analysis failed for %s: %s", self.zone_id, e)
-            return {"zone": self.zone_id, "error": str(e), "autonomous": False}
+            logger.error("Failed to broadcast on %s: %s", topic, e)
 
     # ------------------------------------------------------------------
     # Registry
@@ -325,7 +406,8 @@ Respond with:
             ToolDescriptor(name="voltage_regulation", description="Voltage control", safety_level=SafetyLevel.MEDIUM_RISK),
             ToolDescriptor(name="emergency_islanding", description="Zone isolation", safety_level=SafetyLevel.HIGH_RISK),
             ToolDescriptor(name="detect_violations", description="Violation scan", safety_level=SafetyLevel.READ_ONLY),
-            ToolDescriptor(name="analyze_and_act", description="LLM-powered autonomous analysis", safety_level=SafetyLevel.READ_ONLY),
+            ToolDescriptor(name="execute_safety_rules", description="PLC Deterministic Rules Evaluation", safety_level=SafetyLevel.MEDIUM_RISK),
+            ToolDescriptor(name="update_protection_settings", description="Revise safety thresholds", safety_level=SafetyLevel.HIGH_RISK),
         ]
         return MCPServerRegistration(
             server_id=self.server_id,
@@ -352,6 +434,16 @@ Respond with:
             logger.warning("Failed to register with registry: %s", e)
 
     async def run(self) -> None:
+        settings = get_settings()
+        self.mqtt = MQTTClient(
+            settings.mqtt_broker,
+            settings.mqtt_port,
+            client_id=f"zone_{self.zone_id}_{uuid.uuid4().hex[:4]}"
+        )
+        await self.mqtt.connect()
+        self.audit_log.log_event(self.zone_id, "SYSTEM_START", "Zone PLC Relay Initialized Offline", details={"buses": self.buses})
+        
         await self.register_with_registry()
+        
         async with stdio_server() as (read, write):
             await self.mcp.run(read, write, self.mcp.create_initialization_options())

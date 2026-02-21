@@ -133,19 +133,20 @@ SCENARIOS: dict[str, Scenario] = {
 }
 
 
-def run_scenario(name: str, grid: PowerGridSimulation) -> dict:
+def run_scenario(name: str, grid: PowerGridSimulation, persist: bool = False) -> dict:
     """Run a named scenario and return results."""
     if name not in SCENARIOS:
         return {"error": f"Unknown scenario: {name}", "available": list(SCENARIOS.keys())}
 
     scenario = SCENARIOS[name]
-    logger.info("Running scenario: %s", scenario.name)
+    logger.info("Running scenario: %s (persist=%s)", scenario.name, persist)
 
     # Save state
     snapshot = grid.save_snapshot()
 
     # Setup
     scenario.setup(grid)
+    grid.run_power_flow()
 
     result = {
         "scenario": scenario.name,
@@ -153,12 +154,16 @@ def run_scenario(name: str, grid: PowerGridSimulation) -> dict:
         "expected_violation": scenario.expected_violation,
         "expected_response": scenario.expected_response,
         "grid_converged": grid.net.converged if hasattr(grid.net, "converged") else True,
+        "persist": persist,
     }
 
-    # Note: actual response comes from the agent — this just sets up the condition
-    # Validation would be called after the agent responds
-
-    # Restore for now (agent tests will handle the full flow)
-    grid.restore_snapshot(snapshot)
+    if persist:
+        # Keep the change active so the monitoring loop catches it
+        result["snapshot_id"] = snapshot
+        grid.save_to_file("grid_state.json")
+        logger.info("Scenario %s is now active. Use 'rollback' to restore.", name)
+    else:
+        # Restore immediately (original behavior for testing)
+        grid.restore_snapshot(snapshot)
 
     return result

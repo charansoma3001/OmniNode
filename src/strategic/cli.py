@@ -38,6 +38,7 @@ async def run_cli() -> None:
     # Initialize
     print("Initializing power grid simulation...")
     grid = PowerGridSimulation()
+    grid.save_snapshot()  # Save clean baseline for rollback
 
     # Create all MCP servers for live tool execution
     from src.domains.power_grid.adapter import PowerGridAdapter
@@ -54,7 +55,7 @@ async def run_cli() -> None:
     tool_count = await agent.discover_tools()
     print(f"  → {tool_count} tools discovered ({len(all_servers)} live servers)\n")
 
-    monitor = MonitoringLoop(grid, agent)
+    monitor = MonitoringLoop(grid, agent, coordinators=coordinators)
     monitor_task: asyncio.Task | None = None
 
     while True:
@@ -111,12 +112,30 @@ async def run_cli() -> None:
                 print("  Monitor not running.\n")
 
         elif cmd.startswith("scenario "):
-            scenario_name = cmd.split(" ", 1)[1]
+            parts = cmd.split(" ")
+            scenario_name = parts[1]
+            persist = "--persist" in parts
             from src.simulation.scenarios import run_scenario
-            result = run_scenario(scenario_name, grid)
-            import json
-            print(json.dumps(result, indent=2, default=str))
-            print()
+            result = run_scenario(scenario_name, grid, persist=persist)
+            if "error" in result:
+                print(f"  Error: {result['error']}")
+                print(f"  Available: {', '.join(result.get('available', []))}\n")
+            else:
+                print(f"  Scenario '{result['scenario']}' started.")
+                print(f"  {result['description']}")
+                print(f"  {result.get('snapshot_id', '')}")
+                if persist:
+                    print("  → Note: Running in persistent mode. Use 'rollback' to reset.\n")
+                else:
+                    print("  → Note: Snapshot restored automatically.\n")
+
+        elif cmd == "rollback":
+            if grid._snapshots:
+                grid.restore_snapshot(0)
+                grid.save_to_file("grid_state.json")
+                print("  Grid state restored to initial snapshot.\n")
+            else:
+                print("  No snapshots available to rollback.\n")
 
         else:
             # Natural language query

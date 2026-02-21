@@ -23,6 +23,21 @@ class DataGenerator:
         self.grid = grid
         self.influx = influx
         self._time_offset: float = 0.0  # hours since midnight
+        self._base_loads: dict[int, float] = {}
+        # Save base loads for reference
+        for load_id in self.grid.net.load.index:
+            self._base_loads[load_id] = float(self.grid.net.load.p_mw.at[load_id])
+
+    def vary_loads(self, magnitude: float = 0.05) -> None:
+        """Apply small random perturbations to each load (±magnitude fraction).
+
+        This keeps the simulation dynamic each monitoring cycle. Larger
+        values create more dramatic swings and more frequent violations.
+        """
+        for load_id, base_p in self._base_loads.items():
+            factor = 1.0 + random.uniform(-magnitude, magnitude)
+            self.grid.net.load.loc[load_id, 'p_mw'] = base_p * factor
+        self.grid.run_power_flow()
 
     def generate_snapshot(self, timestamp: datetime | None = None) -> list[SensorReading]:
         """Generate a full set of sensor readings for the current grid state."""

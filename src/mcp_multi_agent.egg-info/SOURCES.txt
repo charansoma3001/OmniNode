@@ -4,12 +4,15 @@ src/__init__.py
 src/common/__init__.py
 src/common/config.py
 src/common/influx_client.py
+src/common/llm_client.py
 src/common/models.py
 src/common/mqtt_client.py
 src/coordination/__init__.py
 src/coordination/optimizer.py
 src/coordination/peer_protocol.py
 src/coordination/zone_coordinator.py
+src/dashboard/__init__.py
+src/dashboard/app.py
 src/domains/__init__.py
 src/domains/base_adapter.py
 src/domains/power_grid/__init__.py
@@ -51,6 +54,7 @@ src/simulation/scenarios.py
 src/strategic/__init__.py
 src/strategic/agent.py
 src/strategic/cli.py
+src/strategic/guardian.py
 src/strategic/memory.py
 src/strategic/monitor.py
 tests/test_actuators.py

@@ -2,7 +2,7 @@
 
 Agent roster:
   • 1× Strategic Agent  (configurable model, e.g. qwen3-coder:30b)
-  • 3× Zone Coordinators (each with its own LLM, e.g. qwen3:4b)
+  • 3× Zone Coordinators (PLC deterministic safety logic via MCP)
   • 1× Safety Guardian   (e.g. llama-guard3)
   • 11 Sensor MCP servers
   • 5  Actuator MCP servers
@@ -55,11 +55,11 @@ async def main() -> None:
     actuators = adapter.create_actuators(grid)
     logger.info("  ✓ Created %d actuator MCP servers", len(actuators))
 
-    # 5. Create coordinators (each gets its own LLM brain automatically)
+    # 5. Create coordinators (deterministic PLC relays)
     coordinators = adapter.create_coordinators(grid)
-    logger.info("  ✓ Created %d zone coordinator agents", len(coordinators))
+    logger.info("  ✓ Created %d zone coordinator PLCs (Deterministic)", len(coordinators))
     for coord in coordinators:
-        logger.info("    • %s → model=%s", coord.name, coord.llm.model)
+        logger.info("    • %s", coord.name)
 
     # 6. Register all servers with the MCP Registry
     logger.info("Registering with MCP Registry...")
@@ -83,9 +83,10 @@ async def main() -> None:
     tool_count = await agent.discover_tools()
     logger.info("  ✓ Agent discovered %d tools (%d with live servers)", tool_count, len(all_servers))
 
-    # 9. Start monitoring loop
+    # 9. Start monitoring loop (zone-first architecture)
     logger.info("Starting monitoring loop (interval=%ds)...", settings.monitor_interval_seconds)
-    monitor = MonitoringLoop(grid, agent, DataGenerator(grid))
+    data_gen = DataGenerator(grid)
+    monitor = MonitoringLoop(grid, agent, data_gen=data_gen, coordinators=coordinators)
 
     # --- Summary ---
     logger.info("")
@@ -93,10 +94,10 @@ async def main() -> None:
     logger.info("  ✅ System ready!  Multi-Agent Roster:")
     logger.info("  ┌──────────────────────────────────────────────────────┐")
     logger.info("  │  Strategic Agent  │ model: %-25s │", settings.strategic_model)
-    logger.info("  │  Zone 1 Agent     │ model: %-25s │", settings.zone1_model)
-    logger.info("  │  Zone 2 Agent     │ model: %-25s │", settings.zone2_model)
-    logger.info("  │  Zone 3 Agent     │ model: %-25s │", settings.zone3_model)
     logger.info("  │  Safety Guardian  │ model: %-25s │", settings.guardian_model)
+    logger.info("  │  Zone 1 PLC       │ Deterministic (IEC 60255)       │")
+    logger.info("  │  Zone 2 PLC       │ Deterministic (IEC 60255)       │")
+    logger.info("  │  Zone 3 PLC       │ Deterministic (IEC 60255)       │")
     logger.info("  └──────────────────────────────────────────────────────┘")
     logger.info("  MCP servers: %d  │  Tools: %d",
                 len(sensors) + len(actuators) + len(coordinators), tool_count)

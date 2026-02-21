@@ -1,4 +1,4 @@
 [console_scripts]
 mcp-cli = src.strategic.cli:main
-mcp-dashboard = dashboard.app:main
+mcp-dashboard = src.dashboard.app:main
 mcp-registry = src.registry.server:main
