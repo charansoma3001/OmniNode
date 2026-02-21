@@ -128,6 +128,9 @@ mcp_storage/
 *.swp
 *.swo
 
+# MkDocs
+site/
+
 # OS
 .DS_Store
 Thumbs.db
