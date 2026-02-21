@@ -71,7 +71,7 @@ class ZoneAuditLogger:
                     cursor = conn.cursor()
                     cursor.execute(
                         '''
-                        INSERT INTO zone_events 
+                        INSERT INTO zone_events
                         (timestamp, zone_id, event_type, message, details, action_taken)
                         VALUES (?, ?, ?, ?, ?, ?)
                         ''',
@@ -85,11 +85,11 @@ class ZoneAuditLogger:
         """Retrieve recent audit events, optionally filtered by zone."""
         query = "SELECT timestamp, zone_id, event_type, message, details, action_taken FROM zone_events"
         params = []
-        
+
         if zone_id:
             query += " WHERE zone_id = ?"
             params.append(zone_id)
-            
+
         query += " ORDER BY timestamp DESC LIMIT ?"
         params.append(limit)
 
@@ -99,7 +99,7 @@ class ZoneAuditLogger:
                 cursor = conn.cursor()
                 cursor.execute(query, params)
                 rows = cursor.fetchall()
-                
+
                 results = []
                 for row in rows:
                     details = json.loads(row["details"]) if row["details"] else {}

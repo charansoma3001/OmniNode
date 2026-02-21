@@ -111,7 +111,7 @@ def update_dashboard(n):
     # Try to load external state first (from CLI scenarios)
     import os
     import time
-    
+
     state_file = "grid_state.json"
     loaded = False
     if os.path.exists(state_file):

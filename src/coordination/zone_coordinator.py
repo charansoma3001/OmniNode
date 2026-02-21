@@ -56,14 +56,14 @@ class ZoneCoordinator:
         self.optimizer = ZoneOptimizer(grid, zone_id, buses, lines)
         self.audit_log = ZoneAuditLogger()
         self.mqtt: MQTTClient | None = None
-        
+
         # Deterministic Protection Thresholds (adjustable via MCP)
         self.protection_settings = {
             "under_voltage_pu": 0.95,
             "over_voltage_pu": 1.05,
             "max_line_loading_pct": 100.0,
         }
-        
+
         # State tracking for deadband/escalation
         self._consecutive_violations = 0
 
@@ -307,18 +307,18 @@ class ZoneCoordinator:
         status = self._get_zone_status()
         violations = self._detect_violations()
         v_list = violations.get("violations", [])
-        
+
         actions_taken = []
         events_logged = []
         escalate = False
-        
+
         if violations["count"] > 0:
             self._consecutive_violations += 1
         else:
             self._consecutive_violations = 0
-            
+
         topics = []
-            
+
         # Rule 4: Strategic Escalation Deadband
         if self._consecutive_violations >= 3:
             msg = f"Escalating: Unable to resolve {violations['count']} violations after 3 cycles."
@@ -354,7 +354,7 @@ class ZoneCoordinator:
             events_logged.append(msg)
 
         post_violations = self._detect_violations()
-        
+
         result_payload = {
             "zone": self.zone_id,
             "violations_before": violations.get("count", 0),
@@ -363,7 +363,7 @@ class ZoneCoordinator:
             "events": events_logged,
             "mode": "deterministic_plc",
         }
-        
+
         # Broadcast status updates
         self._broadcast_state("status", self._get_zone_status())
         for topic in topics:
@@ -374,18 +374,18 @@ class ZoneCoordinator:
     # ------------------------------------------------------------------
     # MQTT Communication
     # ------------------------------------------------------------------
-    
+
     def _broadcast_state(self, topic_suffix: str, payload: dict) -> None:
         """Broadcast an event or state over MQTT to all subscribers."""
         if not self.mqtt:
             return
-        
+
         topic = f"grid/{self.zone_id}/{topic_suffix}"
-        
+
         # We fire and forget asynchronously in the background
         import asyncio
         asyncio.create_task(self._publish_async(topic, payload))
-        
+
     async def _publish_async(self, topic: str, payload: dict) -> None:
         try:
             msg = json.dumps(payload, default=str)
@@ -442,8 +442,8 @@ class ZoneCoordinator:
         )
         await self.mqtt.connect()
         self.audit_log.log_event(self.zone_id, "SYSTEM_START", "Zone PLC Relay Initialized Offline", details={"buses": self.buses})
-        
+
         await self.register_with_registry()
-        
+
         async with stdio_server() as (read, write):
             await self.mcp.run(read, write, self.mcp.create_initialization_options())
