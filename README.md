@@ -1,8 +1,17 @@
-# MCP Power Grid Strategic Agent
+# OmniNode: Autonomous Infrastructure Agents
 
 **Elevator Pitch**: A hierarchical, multi-agent simulation where specialized Large Language Models (LLMs) collaborate via the Model Context Protocol (MCP) to monitor, optimize, and safely control critical physical infrastructure (like power grids, robotics, or satellite networks) autonomously.
 
 This project demonstrates how multiple specialized LLM agents can collaborate to manage critical infrastructure autonomously while ensuring operational safety.
+
+## 🔥 Key Scenarios
+The OmniNode architecture supports multiple interconnected domains:
+- ⚡ **Power Grid**: Autonomous load balancing and fault protection (IEC 60255 compliant).
+- 🤖 **Robotics**: Fleet coordination and path planning.
+- 🛰️ **Satellite**: Constellation health monitoring.
+
+## 🛡️ Safety & Constitutional AI
+Unlike standard agents, OmniNode implements a **Guardian** layer. Before any physical command (like opening a circuit breaker or adjusting thrusters) is sent to hardware, it is validated against a strict *safety constitution* to prevent hallucinated destruction. This ensures deterministic hardware safety even when using probabilistic LLM reasoning.
 
 ---
 
@@ -57,14 +66,14 @@ mcp-multi-agent/
 
 ---
 
-## 🚀 Setup & Installation
+## 🚀 Quick Start
 
-### Prerequisites
-1. **Python 3.11+**
-2. **`uv` Package Manager** (Recommended for fast dependency resolution)
-3. **Ollama** running locally or a remote OpenAI-compatible endpoint.
+Launch the entire ecosystem with a one-liner:
+```bash
+git clone https://github.com/charansoma3001/OmniNode && cd OmniNode && uv sync && docker-compose up -d
+```
 
-### Installation
+### Installation Details
 
 1. **Clone and Install Dependencies:**
    ```bash

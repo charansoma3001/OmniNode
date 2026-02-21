@@ -1,4 +1,4 @@
-site_name: MCP Multi-Agent System
+site_name: OmniNode
 site_description: MCP-Based Multi-Agent System for Power Grid & Beyond
 site_url: https://charansoma3001.github.io/OmniNode/
 repo_url: https://github.com/charansoma3001/OmniNode
@@ -25,6 +25,13 @@ theme:
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
+
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
 
 plugins:
   - search
