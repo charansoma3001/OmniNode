@@ -27,7 +27,7 @@
     
     
       
-        <title>Configuration - MCP Multi-Agent System</title>
+        <title>Configuration - OmniNode</title>
       
     
     
@@ -94,7 +94,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="MCP Multi-Agent System" class="md-header__button md-logo" aria-label="MCP Multi-Agent System" data-md-component="logo">
+    <a href=".." title="OmniNode" class="md-header__button md-logo" aria-label="OmniNode" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +108,7 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            MCP Multi-Agent System
+            OmniNode
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
@@ -340,13 +340,13 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href=".." title="MCP Multi-Agent System" class="md-nav__button md-logo" aria-label="MCP Multi-Agent System" data-md-component="logo">
+    <a href=".." title="OmniNode" class="md-nav__button md-logo" aria-label="OmniNode" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
 
     </a>
-    MCP Multi-Agent System
+    OmniNode
   </label>
   
     <div class="md-nav__source">
@@ -718,46 +718,46 @@
 <h3 id="grid_statejson"><code>grid_state.json</code></h3>
 <p>This is the central "digital twin" storage file updated continuously by the <code>PowerGridAdapter</code>. 
 It holds the latest snapshot of the physical simulation.</p>
-<p><strong>Structure:</strong></p>
-<pre><code class="language-json">{
-  &quot;timestamp&quot;: &quot;2023-10-24T12:00:00Z&quot;,
-  &quot;buses&quot;: [
-    {
-      &quot;id&quot;: 0,
-      &quot;zone&quot;: &quot;Zone 1&quot;,
-      &quot;voltage_pu&quot;: 1.02,
-      &quot;type&quot;: &quot;slack&quot;
-    }
-  ],
-  &quot;lines&quot;: [
-    {
-      &quot;id&quot;: 0,
-      &quot;from_bus&quot;: 0,
-      &quot;to_bus&quot;: 1,
-      &quot;loading_percent&quot;: 45.3,
-      &quot;status&quot;: &quot;closed&quot;
-    }
-  ],
-  &quot;generators&quot;: [...],
-  &quot;loads&quot;: [...]
-}
-</code></pre>
+<p><strong>Structure:</strong>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;timestamp&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2023-10-24T12:00:00Z&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;buses&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;zone&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Zone 1&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;voltage_pu&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1.02</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;slack&quot;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;lines&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;from_bus&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;to_bus&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;loading_percent&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">45.3</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;closed&quot;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;generators&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;loads&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div></p>
 <h3 id="registry_storejson"><code>registry_store.json</code></h3>
 <p>This file is managed exclusively by the <code>mcp-registry</code> (FastAPI). It holds a list of all currently active MCP servers (sensors, actuators, coordinators).</p>
-<p><strong>Structure:</strong></p>
-<pre><code class="language-json">{
-  &quot;servers&quot;: {
-    &quot;voltage_sensor_zone1&quot;: {
-      &quot;type&quot;: &quot;sensor&quot;,
-      &quot;url&quot;: &quot;http://localhost:8001/mcp&quot;,
-      &quot;status&quot;: &quot;online&quot;,
-      &quot;last_heartbeat&quot;: &quot;2023-10-24T12:00:05Z&quot;
-    },
-    ...
-  }
-}
-</code></pre>
-<p>Agents query this file (via the registry API) to perform dynamic tool discovery.</p>
+<p><strong>Structure:</strong>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;servers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;voltage_sensor_zone1&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sensor&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;http://localhost:8001/mcp&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;online&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;last_heartbeat&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2023-10-24T12:00:05Z&quot;</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="err">...</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+Agents query this file (via the registry API) to perform dynamic tool discovery.</p>
 
 
 

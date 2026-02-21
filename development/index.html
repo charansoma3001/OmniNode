@@ -27,7 +27,7 @@
     
     
       
-        <title>Developer Guide - MCP Multi-Agent System</title>
+        <title>Developer Guide - OmniNode</title>
       
     
     
@@ -94,7 +94,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="MCP Multi-Agent System" class="md-header__button md-logo" aria-label="MCP Multi-Agent System" data-md-component="logo">
+    <a href=".." title="OmniNode" class="md-header__button md-logo" aria-label="OmniNode" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +108,7 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            MCP Multi-Agent System
+            OmniNode
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
@@ -340,13 +340,13 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href=".." title="MCP Multi-Agent System" class="md-nav__button md-logo" aria-label="MCP Multi-Agent System" data-md-component="logo">
+    <a href=".." title="OmniNode" class="md-nav__button md-logo" aria-label="OmniNode" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
 
     </a>
-    MCP Multi-Agent System
+    OmniNode
   </label>
   
     <div class="md-nav__source">
@@ -661,55 +661,55 @@
 <p>This guide covers how to extend the MCP multi-agent framework by adding new domains, creating sensors/actuators, and testing the system.</p>
 <h2 id="extending-base_adapterpy">Extending <code>base_adapter.py</code></h2>
 <p>If you are adding a new domain (e.g., Robotics), you must implement the <code>BaseAdapter</code> interface.</p>
-<pre><code class="language-python">from src.domains.base_adapter import BaseAdapter
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">src.domains.base_adapter</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseAdapter</span>
 
-class RoboticsAdapter(BaseAdapter):
-    def initialize_simulation(self):
-        # Setup kinematic chains, physics engine, etc.
-        pass
+<span class="k">class</span><span class="w"> </span><span class="nc">RoboticsAdapter</span><span class="p">(</span><span class="n">BaseAdapter</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">initialize_simulation</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Setup kinematic chains, physics engine, etc.</span>
+        <span class="k">pass</span>
 
-    def step_simulation(self):
-        # Advance the simulation by one tick
-        pass
+    <span class="k">def</span><span class="w"> </span><span class="nf">step_simulation</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Advance the simulation by one tick</span>
+        <span class="k">pass</span>
 
-    def get_sensors(self):
-        # Return a list of sensor tools
-        pass
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_sensors</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Return a list of sensor tools</span>
+        <span class="k">pass</span>
 
-    def get_actuators(self):
-        # Return a list of actuator tools
-        pass
-</code></pre>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_actuators</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Return a list of actuator tools</span>
+        <span class="k">pass</span>
+</code></pre></div>
 <h2 id="creating-new-sensors-or-actuators">Creating New Sensors or Actuators</h2>
 <p>All components that expose data or functionality must be wrapped as an MCP Server.</p>
 <p><strong>1. Define the Server:</strong>
 Use the <code>mcp.server.Server</code> class.</p>
 <p><strong>2. Expose the Data/Action:</strong>
 Use the <code>@server.mcp.list_tools()</code> and <code>@server.mcp.call_tool()</code> decorators.</p>
-<pre><code class="language-python">import mcp.server.Server
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">mcp.server.Server</span>
 
-# Example Custom Sensor
-sensor = mcp.server.Server(&quot;CustomVoltageSensor&quot;)
+<span class="c1"># Example Custom Sensor</span>
+<span class="n">sensor</span> <span class="o">=</span> <span class="n">mcp</span><span class="o">.</span><span class="n">server</span><span class="o">.</span><span class="n">Server</span><span class="p">(</span><span class="s2">&quot;CustomVoltageSensor&quot;</span><span class="p">)</span>
 
-@sensor.mcp.list_tools()
-async def list_tools() -&gt; list[Tool]:
-    return [Tool(name=&quot;read_voltage&quot;, description=&quot;Reads voltage at bus 5&quot;)]
+<span class="nd">@sensor</span><span class="o">.</span><span class="n">mcp</span><span class="o">.</span><span class="n">list_tools</span><span class="p">()</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">list_tools</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">Tool</span><span class="p">]:</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">Tool</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;read_voltage&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Reads voltage at bus 5&quot;</span><span class="p">)]</span>
 
-@sensor.mcp.call_tool()
-async def call_tool(name: str, arguments: dict) -&gt; list[TextContent]:
-    if name == &quot;read_voltage&quot;:
-        # fetch from grid_state.json or memory
-        return [TextContent(type=&quot;text&quot;, text=&quot;1.05 p.u.&quot;)]
-</code></pre>
+<span class="nd">@sensor</span><span class="o">.</span><span class="n">mcp</span><span class="o">.</span><span class="n">call_tool</span><span class="p">()</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">call_tool</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">arguments</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">TextContent</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="n">name</span> <span class="o">==</span> <span class="s2">&quot;read_voltage&quot;</span><span class="p">:</span>
+        <span class="c1"># fetch from grid_state.json or memory</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">TextContent</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s2">&quot;text&quot;</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="s2">&quot;1.05 p.u.&quot;</span><span class="p">)]</span>
+</code></pre></div>
 <p><strong>3. Registration:</strong>
 Ensure the new server registers itself with the <code>mcp-registry</code> on startup so the Strategic Agent or Zone Coordinators can find it.</p>
 <h2 id="running-the-test-suite">Running the Test Suite</h2>
 <p>We use <code>pytest</code> for all unit and integration testing.</p>
-<pre><code class="language-bash">uv run pytest tests/
-</code></pre>
-<p>To run with coverage:</p>
-<pre><code class="language-bash">uv run pytest --cov=src tests/
-</code></pre>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/
+</code></pre></div>
+<p>To run with coverage:
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>--cov<span class="o">=</span>src<span class="w"> </span>tests/
+</code></pre></div></p>
 <p>Continuous Integration (CI) will enforce that these tests pass on every pull request to <code>main</code>.</p>
 
 
