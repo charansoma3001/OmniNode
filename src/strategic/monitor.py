@@ -92,6 +92,22 @@ class MonitoringLoop:
 
         # Detect violations
         violations = self._detect_all_violations()
+        zone_violations = self._group_by_zone(violations)
+
+        # --- Publish to WebSocket via Event Bus (Always publish state for UI) ---
+        try:
+            # Simple zone health eval for demo UI
+            zone_health = {}
+            for z_id in self._coordinators.keys():
+                z_viols = len(zone_violations.get(z_id, []))
+                zone_health[z_id] = "critical" if z_viols > 2 else "warning" if z_viols > 0 else "healthy"
+
+            payload = self.grid.get_state(zone_health=zone_health)
+
+            asyncio.create_task(event_bus.publish("grid_state", payload))
+            logger.debug("Published simulated grid state to EventBus")
+        except Exception as e:
+            logger.error("Failed to publish grid state: %s", e)
 
         if not violations:
             if self._cycle_count % 6 == 0:  # Log every ~3 min at 30s interval
@@ -102,7 +118,6 @@ class MonitoringLoop:
         self._violations_history.extend(violations)
 
         # --- Zone-first dispatch ---
-        zone_violations = self._group_by_zone(violations)
         zone_results = {}
         escalations = []
 
@@ -159,20 +174,7 @@ class MonitoringLoop:
             except Exception as e:
                 logger.error("Strategic agent error: %s", e)
 
-        # --- Publish to WebSocket via Event Bus ---
-        try:
-            # Simple zone health eval for demo UI
-            zone_health = {}
-            for z_id in self._coordinators.keys():
-                z_viols = len(zone_violations.get(z_id, []))
-                zone_health[z_id] = "critical" if z_viols > 2 else "warning" if z_viols > 0 else "healthy"
-
-            payload = self.grid.get_state(zone_health=zone_health)
-
-            asyncio.create_task(event_bus.publish("grid_state", payload))
-            logger.debug("Published simulated grid state to EventBus")
-        except Exception as e:
-            logger.error("Failed to publish grid state: %s", e)
+        # Strategic escalation block ends here
 
     async def _trigger_zone_rules(self, coordinator: ZoneCoordinator) -> dict:
         """Trigger deterministic PLC safety rules in a zone."""
@@ -258,6 +260,15 @@ class MonitoringLoop:
 
     def _build_directive(self, violations: list[ViolationEvent], zone_results: dict) -> str:
         """Build a concrete action directive for the strategic agent."""
+        if not getattr(self.grid.net, "converged", True):
+            return (
+                "🚨 CRITICAL BLACKOUT: AC Power Flow Divergence. The grid topology is mathematically unstable. "
+                "Standard generator ramping will FAIL.\n\n"
+                "YOUR ONLY OPTIONS TO RESTORE THE GRID ARE:\n"
+                "1. Identify tripped lines (open circuit breakers) and CLOSE them.\n"
+                "2. If no lines are tripped, SHED at least 40% of all load immediately."
+            )
+
         # Count violation types using correct ViolationEvent field names
         low_v  = [v for v in violations if "low"     in v.violation_type]
         high_v = [v for v in violations if "high"    in v.violation_type]
@@ -276,7 +287,7 @@ class MonitoringLoop:
             target_p  = min(current_p + 10.0, max_p)
             primary_gen = gen_ids[0] if gen_ids else "gen_0"
             actions.append(
-                f"  • Call actuate_device(device_id='{primary_gen}', action='set_output', "
+                f"  • Call generator_actuator_system_control(device_id='{primary_gen}', action='set_output', "
                 f"parameters={{'p_mw': {target_p:.1f}}}) "
                 f"→ Raises voltage by injecting {target_p - current_p:.1f} MW more."
             )
@@ -285,7 +296,7 @@ class MonitoringLoop:
                 max_p2 = float(self.grid.net.gen.max_p_mw.iloc[1]) if "max_p_mw" in self.grid.net.gen.columns else current_p2 * 1.5
                 target_p2 = min(current_p2 + 5.0, max_p2)
                 actions.append(
-                    f"  • Also consider actuate_device(device_id='{gen_ids[1]}', action='set_output', "
+                    f"  • Also consider generator_actuator_system_control(device_id='{gen_ids[1]}', action='set_output', "
                     f"parameters={{'p_mw': {target_p2:.1f}}}) "
                     f"→ Additional support from secondary generator."
                 )
@@ -303,7 +314,7 @@ class MonitoringLoop:
             critical_loads = load_ids[:2] if len(load_ids) >= 2 else load_ids
             for lid in critical_loads:
                 actions.append(
-                    f"  • Call actuate_device(device_id='{lid}', action='scale', "
+                    f"  • Call load_controller_actuator_system_control(device_id='{lid}', action='scale', "
                     f"parameters={{'scale_factor': 0.8}}) "
                     f"→ Reduce load by 20% to relieve line overload."
                 )
@@ -311,7 +322,7 @@ class MonitoringLoop:
         if not actions:
             primary_gen = gen_ids[0] if gen_ids else "gen_0"
             actions.append(
-                f"  • Call actuate_device(device_id='{primary_gen}', action='ramp', "
+                f"  • Call generator_actuator_system_control(device_id='{primary_gen}', action='ramp', "
                 f"parameters={{'delta_mw': 5.0}}) → Generic voltage support."
             )
 

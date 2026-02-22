@@ -15,7 +15,8 @@ class GeneratorServer(BaseActuatorServer):
         super().__init__(device_type="generator", grid=grid, zone=zone)
 
     def _execute_action(self, device_id: str, action: str, parameters: dict) -> ActuatorResponse:
-        gen_id = int(device_id.replace("gen_", ""))
+        import re
+        gen_id = int(re.sub(r'\D', '', device_id) or -1)
         prev_p = float(self.grid.net.gen.p_mw.at[gen_id])
 
         if action == "set_output":
@@ -56,7 +57,8 @@ class GeneratorServer(BaseActuatorServer):
         return [f"gen_{g}" for g in self.grid.net.gen.index]
 
     def _get_device_status(self, device_id: str) -> dict:
-        gen_id = int(device_id.replace("gen_", ""))
+        import re
+        gen_id = int(re.sub(r'\D', '', device_id) or -1)
         gen = self.grid.net.gen.loc[gen_id]
         res = self.grid.net.res_gen.loc[gen_id]
         return {
@@ -71,7 +73,8 @@ class GeneratorServer(BaseActuatorServer):
         }
 
     def _validate_in_sandbox(self, device_id: str, action: str, parameters: dict) -> dict:
-        gen_id = int(device_id.replace("gen_", ""))
+        import re
+        gen_id = int(re.sub(r'\D', '', device_id) or -1)
         p_mw = parameters.get("p_mw", float(self.grid.net.gen.p_mw.at[gen_id]))
 
         def action_fn():

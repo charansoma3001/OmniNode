@@ -12,6 +12,7 @@ class EnergyStorageServer(BaseActuatorServer):
 
     Simulated as a controllable load/generator on a bus with SoC tracking.
     """
+    _valid_actions = ["charge", "discharge", "stop", "emergency_stop"]
 
     def __init__(self, grid: PowerGridSimulation, zone: str = "system"):
         super().__init__(device_type="energy_storage", grid=grid, zone=zone)

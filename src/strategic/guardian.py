@@ -41,6 +41,20 @@ class SafetyGuardian:
         Returns:
             Dict with 'safe' (bool), 'risk_level', 'reasoning', 'conditions'.
         """
+        # Sanitize command fields from common LLM hallucinations before processing or UI broadcast
+        raw_action = command.get("action", "")
+        # Fallback: if 'action' wasn't explicitly provided, search other keys like 'status', 'operation'
+        if not raw_action:
+            for k, v in command.items():
+                if isinstance(v, str) and v.lower() in {"open", "close", "activate", "deactivate", "scale", "shed", "restore", "charge", "discharge", "set_output", "ramp", "emergency_stop"}:
+                    raw_action = v
+                    break
+        command["action"] = str(raw_action.get("operation", raw_action.get("action", raw_action)) if isinstance(raw_action, dict) else raw_action)
+        
+        raw_target = command.get("device_id", command.get("target", "unknown"))
+        command["device_id"] = str(raw_target.get("id", raw_target) if isinstance(raw_target, dict) else raw_target)
+        command["target"] = command["device_id"]
+        
         prompt = f"""Evaluate the safety of the following power grid command:
 
 Action: {command.get('action', 'unknown')}

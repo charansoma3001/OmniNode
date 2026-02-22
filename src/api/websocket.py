@@ -102,6 +102,22 @@ async def websocket_commands(websocket: WebSocket) -> None:
                             "level": "warning",
                             "message": f"CRITICAL: System administrator triggered scenario '{payload}'"
                         }))
+                        
+                    elif action == "rollback":
+                        logger.info("Triggering system rollback")
+                        if active_grid._snapshots:
+                            active_grid.restore_snapshot(0)
+                        else:
+                            # Re-initialize the case explicitly if no snapshots exist
+                            from src.simulation.power_grid import PowerGridSimulation
+                            active_grid.__init__()
+                        
+                        active_grid.save_to_file("grid_state.json")
+                        asyncio.create_task(event_bus.publish("grid_state", active_grid.get_state()))
+                        asyncio.create_task(event_bus.publish("agent_log", {
+                            "level": "info",
+                            "message": "System administrator initiated a rollback. Grid state restored to baseline."
+                        }))
                 else:
                     # MOCK MODE
                     await event_bus.publish("agent_log", {

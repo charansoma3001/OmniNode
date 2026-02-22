@@ -9,13 +9,15 @@ from src.simulation.power_grid import PowerGridSimulation
 
 class CircuitBreakerServer(BaseActuatorServer):
     """MCP server for circuit breaker (line switching) control."""
+    _valid_actions = ["open", "close", "emergency_stop"]
 
     def __init__(self, grid: PowerGridSimulation, zone: str = "system"):
         super().__init__(device_type="circuit_breaker", grid=grid, zone=zone)
         self._zone_lines = grid.get_zone_lines()
 
     def _execute_action(self, device_id: str, action: str, parameters: dict) -> ActuatorResponse:
-        line_id = int(device_id.replace("breaker_line_", ""))
+        import re
+        line_id = int(re.sub(r'\D', '', device_id) or -1)
         prev_status = bool(self.grid.net.line.in_service.at[line_id])
 
         if action == "open":
@@ -47,7 +49,8 @@ class CircuitBreakerServer(BaseActuatorServer):
         return [f"breaker_line_{l}" for l in lines]
 
     def _get_device_status(self, device_id: str) -> dict:
-        line_id = int(device_id.replace("breaker_line_", ""))
+        import re
+        line_id = int(re.sub(r'\D', '', device_id) or -1)
         line = self.grid.net.line.loc[line_id]
         loading = float(self.grid.net.res_line.loading_percent.at[line_id]) if line.in_service else 0
         return {
@@ -60,7 +63,8 @@ class CircuitBreakerServer(BaseActuatorServer):
         }
 
     def _validate_in_sandbox(self, device_id: str, action: str, parameters: dict) -> dict:
-        line_id = int(device_id.replace("breaker_line_", ""))
+        import re
+        line_id = int(re.sub(r'\D', '', device_id) or -1)
         in_service = action == "close"
 
         def action_fn():

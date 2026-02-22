@@ -22,6 +22,9 @@ export function CommandBar() {
         if (input.startsWith("scenario ")) {
             action = "trigger_scenario";
             payload = input.replace("scenario ", "");
+        } else if (input.trim().toLowerCase() === "rollback") {
+            action = "rollback";
+            payload = "";
         }
 
         sendMessage(JSON.stringify({ action, payload }));

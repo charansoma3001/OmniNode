@@ -7,8 +7,8 @@ This project demonstrates how multiple specialized LLM agents can collaborate to
 ## 🔥 Key Scenarios
 The OmniNode architecture supports multiple interconnected domains:
 - ⚡ **Power Grid**: Autonomous load balancing and fault protection (IEC 60255 compliant).
-- 🤖 **Robotics**: Fleet coordination and path planning.
-- 🛰️ **Satellite**: Constellation health monitoring.
+- 🤖 **Robotics**: Fleet coordination and path planning (Future Work).
+- 🛰️ **Satellite**: Constellation health monitoring (Future Work).
 
 ## 🛡️ Safety & Constitutional AI
 Unlike standard agents, OmniNode implements a **Guardian** layer. Before any physical command (like opening a circuit breaker or adjusting thrusters) is sent to hardware, it is validated against a strict *safety constitution* to prevent hallucinated destruction. This ensures deterministic hardware safety even when using probabilistic LLM reasoning.

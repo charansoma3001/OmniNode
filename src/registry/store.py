@@ -99,18 +99,18 @@ class RegistryStore:
         return tools
 
     async def cleanup_stale(self) -> int:
-        """Mark servers as stale if they haven't sent a heartbeat recently."""
+        """Remove servers that haven't sent a heartbeat recently."""
         now = datetime.utcnow()
         count = 0
         async with self._lock:
-            for server in self._servers.values():
-                if (
-                    server.status == ServerStatus.ACTIVE
-                    and (now - server.last_heartbeat) > STALE_THRESHOLD
-                ):
-                    server.status = ServerStatus.STALE
-                    count += 1
-                    logger.warning("Server %s marked stale", server.server_id)
+            to_delete = []
+            for sid, server in self._servers.items():
+                if (now - server.last_heartbeat) > STALE_THRESHOLD:
+                    to_delete.append(sid)
+            for sid in to_delete:
+                del self._servers[sid]
+                count += 1
+                logger.warning("Server %s removed due to staleness (cleanup)", sid)
             if count:
                 self._save()
         return count

@@ -32,7 +32,8 @@ class VoltageRegulatorServer(BaseActuatorServer):
 
     def _execute_action(self, device_id: str, action: str, parameters: dict) -> ActuatorResponse:
         action = self._ACTION_ALIASES.get(action, action)  # normalize
-        shunt_id = int(device_id.replace("shunt_", ""))
+        import re
+        shunt_id = int(re.sub(r'\D', '', device_id) or -1)
         prev = bool(self.grid.net.shunt.in_service.at[shunt_id])
 
         if action == "activate":
@@ -61,7 +62,8 @@ class VoltageRegulatorServer(BaseActuatorServer):
         return [f"shunt_{s}" for s in self.grid.net.shunt.index]
 
     def _get_device_status(self, device_id: str) -> dict:
-        shunt_id = int(device_id.replace("shunt_", ""))
+        import re
+        shunt_id = int(re.sub(r'\D', '', device_id) or -1)
         shunt = self.grid.net.shunt.loc[shunt_id]
         return {
             "device_id": device_id,
@@ -74,7 +76,8 @@ class VoltageRegulatorServer(BaseActuatorServer):
 
     def _validate_in_sandbox(self, device_id: str, action: str, parameters: dict) -> dict:
         action = self._ACTION_ALIASES.get(action, action)  # normalize before validation
-        shunt_id = int(device_id.replace("shunt_", ""))
+        import re
+        shunt_id = int(re.sub(r'\D', '', device_id) or -1)
         in_service = action == "activate"
 
         def action_fn():

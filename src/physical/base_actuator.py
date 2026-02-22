@@ -182,9 +182,21 @@ class BaseActuatorServer(ABC):
     # ------------------------------------------------------------------
 
     def _handle_control(self, args: dict) -> dict:
-        device_id = args["device_id"]
-        action = args["action"]
+        raw_device = args.get("device_id", "")
+        device_id = str(raw_device.get("id", raw_device) if isinstance(raw_device, dict) else raw_device)
+        
+        raw_action = args.get("action", "")
+        if not raw_action:
+            for k, v in args.items():
+                if isinstance(v, str) and v.lower() in {"open", "close", "activate", "deactivate", "scale", "shed", "restore", "charge", "discharge", "set_output", "ramp", "emergency_stop"}:
+                    raw_action = v
+                    break
+        action = str(raw_action.get("operation", raw_action.get("action", raw_action)) if isinstance(raw_action, dict) else raw_action)
+        
         parameters = args.get("parameters", {})
+        if not isinstance(parameters, dict):
+            parameters = {}
+            
         validate = args.get("validate", True)
 
         # Safety: validate first
@@ -202,11 +214,22 @@ class BaseActuatorServer(ABC):
         return response.model_dump(mode="json")
 
     def _handle_validate(self, args: dict) -> dict:
-        return self._validate_in_sandbox(
-            args["device_id"],
-            args["action"],
-            args.get("parameters", {}),
-        )
+        raw_device = args.get("device_id", "")
+        device_id = str(raw_device.get("id", raw_device) if isinstance(raw_device, dict) else raw_device)
+        
+        raw_action = args.get("action", "")
+        if not raw_action:
+            for k, v in args.items():
+                if isinstance(v, str) and v.lower() in {"open", "close", "activate", "deactivate", "scale", "shed", "restore", "charge", "discharge", "set_output", "ramp", "emergency_stop"}:
+                    raw_action = v
+                    break
+        action = str(raw_action.get("operation", raw_action.get("action", raw_action)) if isinstance(raw_action, dict) else raw_action)
+        
+        parameters = args.get("parameters", {})
+        if not isinstance(parameters, dict):
+            parameters = {}
+
+        return self._validate_in_sandbox(device_id, action, parameters)
 
     def _handle_emergency(self, zone_id: str) -> dict:
         """Default emergency: disable all devices in zone."""

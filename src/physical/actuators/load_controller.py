@@ -33,7 +33,8 @@ class LoadControllerServer(BaseActuatorServer):
 
     def _execute_action(self, device_id: str, action: str, parameters: dict) -> ActuatorResponse:
         action = self._ACTION_ALIASES.get(action, action)  # normalize
-        load_id = int(device_id.replace("load_", ""))
+        import re
+        load_id = int(re.sub(r'\D', '', device_id) or -1)
         prev_p = float(self.grid.net.load.p_mw.at[load_id])
 
         if action == "scale":
@@ -83,7 +84,8 @@ class LoadControllerServer(BaseActuatorServer):
         return [f"load_{l}" for l in self.grid.net.load.index]
 
     def _get_device_status(self, device_id: str) -> dict:
-        load_id = int(device_id.replace("load_", ""))
+        import re
+        load_id = int(re.sub(r'\D', '', device_id) or -1)
         load = self.grid.net.load.loc[load_id]
         return {
             "device_id": device_id,
@@ -95,7 +97,8 @@ class LoadControllerServer(BaseActuatorServer):
         }
 
     def _validate_in_sandbox(self, device_id: str, action: str, parameters: dict) -> dict:
-        load_id = int(device_id.replace("load_", ""))
+        import re
+        load_id = int(re.sub(r'\D', '', device_id) or -1)
         factor = parameters.get("scale_factor", 0.0 if action == "shed" else 1.0)
 
         def action_fn():
