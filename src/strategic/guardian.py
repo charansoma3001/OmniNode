@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import json
 import logging
+import asyncio
 
 from src.common.llm_client import LLMClient, create_guardian_llm
+from src.api.event_bus import event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,27 @@ Respond ONLY with a JSON object (no markdown):
             command.get("action"), command.get("target"),
             result.get("safe"), result.get("risk_level"),
         )
+        
+        # Publish event
+        try:
+            from datetime import datetime
+            event_payload = {
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "command": command,
+                "safe": result.get("safe", False),
+                "risk_level": result.get("risk_level", "HIGH"),
+                "reasoning": result.get("reasoning", ""),
+                "conditions": result.get("conditions", [])
+            }
+            # Try to publish if there's a running event loop
+            loop = asyncio.get_running_loop()
+            loop.create_task(event_bus.publish("guardian_event", event_payload))
+        except RuntimeError:
+            # We might not be in an event loop (e.g., synchronous tests)
+            pass
+        except Exception as e:
+            logger.error(f"Failed to publish guardian_event: {e}")
+
         return result
 
     def get_validation_log(self) -> list[dict]:

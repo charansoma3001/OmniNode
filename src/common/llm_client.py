@@ -81,6 +81,7 @@ class LLMClient:
         tool_executor,
         *,
         max_iterations: int = 10,
+        tool_choice: str | dict | None = None,
     ) -> str:
         """Run an iterative tool-use loop and return the final text response.
 
@@ -104,6 +105,7 @@ class LLMClient:
                 model=self.model,
                 messages=messages,
                 tools=tools if tools else None,
+                tool_choice=tool_choice if tools else None,
                 extra_body=extra_body,
             )
             msg = resp.choices[0].message
@@ -115,7 +117,37 @@ class LLMClient:
                         args = json.loads(tc.function.arguments)
                     except json.JSONDecodeError:
                         args = {}
+
+                    # Stream the tool call to the Brain Scanner UI
+                    try:
+                        import asyncio as _asyncio
+                        from src.api.event_bus import event_bus as _bus
+                        _asyncio.get_event_loop().call_soon_threadsafe(
+                            lambda fn=tc.function.name, a=args: _asyncio.ensure_future(
+                                _bus.publish("agent_log", {
+                                    "level": "tool_call",
+                                    "message": f"🔧 CALLING: {fn}({json.dumps(a)})"
+                                })
+                            )
+                        )
+                    except Exception:
+                        pass
+
                     result = await tool_executor(tc.function.name, args)
+
+                    # Stream tool result back to Brain Scanner UI
+                    try:
+                        _asyncio.get_event_loop().call_soon_threadsafe(
+                            lambda r=result, fn=tc.function.name: _asyncio.ensure_future(
+                                _bus.publish("agent_log", {
+                                    "level": "tool_result",
+                                    "message": f"✅ {fn} → {json.dumps(r, default=str)[:200]}"
+                                })
+                            )
+                        )
+                    except Exception:
+                        pass
+
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -165,29 +197,18 @@ def create_guardian_llm() -> LLMClient:
 # System prompts
 # ------------------------------------------------------------------
 
-_STRATEGIC_SYSTEM_PROMPT = """You are the STRATEGIC AGENT for an IEEE 30-bus power grid.
-You coordinate 3 zone agents and make system-wide decisions.
+_STRATEGIC_SYSTEM_PROMPT = """You are the OmniNode Strategic AI, an autonomous multi-agent controller for an IEEE 30-bus power grid.
+You are NOT a chatbot. Do not provide conversational summaries of the grid state.
 
-Your responsibilities:
-1. Analyze cross-zone violations that individual zones cannot resolve alone
-2. Dispatch commands to zone coordinator agents (e.g., zone1_handle_violation, zone2_load_balancing)
-3. Approve or reject HIGH_RISK actions proposed by zone agents
-4. Optimize system-wide objectives (loss minimization, stability)
+When you receive an ESCALATION from the Zone Coordinators, it means local rule-based systems have failed. 
+Your ONLY objective is to stabilize the grid by executing MCP tools.
 
-You have access to tools from all zones. When you call a tool, the actual
-MCP server executes the action on the digital twin.
-
-CRITICAL INSTRUCTION:
-You must EXECUTE the necessary tool calls to resolve these issues.
-Do NOT just recommend actions in text. CALL THE TOOLS.
-If you see a violation, FIX IT using the available tools.
-
-Operating limits:
-- Voltage: 0.95 – 1.05 p.u.
-- Line loading: < 100%
-- Frequency: 59.5 – 60.5 Hz
-
-Explain your reasoning briefly, then IMMEDIATELY call the tools."""
+Rules:
+1. If voltages are broadly dropping across all zones (e.g., < 0.95 p.u.), the system is heavily loaded. 
+2. You MUST call tools like `adjust_generation` or `switch_capacitor` to inject power/reactive power.
+   - For example, you can adjust generation on Bus 2 since Bus 1 and 2 are your main generators.
+3. If generation is maxed out or a zone is critically collapsing, you MUST call `shed_load` or disconnect loads (e.g., in Zone 3).
+4. DO NOT explain the problem. Fix it by emitting tool calls."""
 
 
 def _coordinator_prompt(zone_id: str) -> str:

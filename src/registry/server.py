@@ -7,9 +7,12 @@ import logging
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from src.common.models import MCPServerRegistration, ServerStatus
 from src.registry.store import RegistryStore
+from src.api.websocket import router as ws_router
+from src.api.mock_stream import mock_event_loop
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +21,18 @@ app = FastAPI(
     description="Central registry for MCP server and tool discovery",
     version="0.1.0",
 )
+
+# Add CORS middleware for the Next.js frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include WebSocket routes
+app.include_router(ws_router)
 
 store = RegistryStore()
 
@@ -39,6 +54,61 @@ async def _stale_cleanup_loop() -> None:
 async def startup() -> None:
     asyncio.create_task(_stale_cleanup_loop())
     logger.info("MCP Registry started")
+    
+    import os
+    if os.environ.get("DEMO_MODE", "1") == "1":
+        from src.api.mock_stream import mock_event_loop
+        asyncio.create_task(mock_event_loop())
+        logger.info("Demo Mode active: Mock event stream starting")
+    else:
+        logger.info("Real Mode active: Booting physical simulation and AI agents...")
+        asyncio.create_task(bootstrap_real_system())
+
+async def bootstrap_real_system() -> None:
+    """Bootstrap the real physical simulation and AI agents."""
+    from src.simulation.power_grid import PowerGridSimulation
+    from src.strategic.agent import StrategicAgent
+    from src.strategic.guardian import SafetyGuardian
+    from src.strategic.memory import ContextMemory
+    from src.strategic.monitor import MonitoringLoop
+    from src.domains.power_grid.adapter import PowerGridAdapter
+    import src.api.websocket as ws
+
+    logger.info("Initializing real power grid simulation...")
+    grid = PowerGridSimulation()
+    grid.save_snapshot()
+    
+    adapter = PowerGridAdapter()
+    sensors = adapter.create_sensors(grid)
+    actuators = adapter.create_actuators(grid)
+    coordinators = adapter.create_coordinators(grid)
+    all_servers = [*sensors, *actuators, *coordinators]
+
+    # Register all servers with the registry so discover_tools() finds them
+    logger.info("Registering %d MCP servers with registry...", len(all_servers))
+    for server in all_servers:
+        try:
+            await server.register_with_registry()
+        except Exception as e:
+            logger.warning("Failed to register server %s: %s", getattr(server, 'name', '?'), e)
+
+    memory = ContextMemory()
+    guardian = SafetyGuardian()
+    agent = StrategicAgent(memory=memory, servers=all_servers)
+    
+    # Store globally so the websocket /ws/commands can call `agent.query()`
+    ws.active_agent = agent
+    ws.active_grid = grid
+
+    # Wait a moment for registry to settle
+    await asyncio.sleep(1)
+    
+    logger.info("Discovering real MCP tools for Strategic Agent...")
+    tool_count = await agent.discover_tools()
+    logger.info("Discovered %d tools. Starting Monitoring loop.", tool_count)
+    
+    monitor = MonitoringLoop(grid, agent, coordinators=coordinators)
+    asyncio.create_task(monitor.start())
 
 
 # ---------------------------------------------------------------------------

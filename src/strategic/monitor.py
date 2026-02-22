@@ -15,12 +15,15 @@ import logging
 from collections import defaultdict
 from datetime import datetime
 
+import pandas as pd
+
 from src.common.config import get_settings
 from src.common.models import ViolationEvent
 from src.coordination.zone_coordinator import ZoneCoordinator
 from src.simulation.power_grid import PowerGridSimulation
 from src.simulation.data_generator import DataGenerator
 from src.strategic.agent import StrategicAgent
+from src.api.event_bus import event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -144,14 +147,10 @@ class MonitoringLoop:
                 "Escalating %d violations to strategic agent...", len(escalations)
             )
             try:
-                summary = self._format_violations(escalations)
-                zone_context = json.dumps(zone_results, default=str, indent=2)
+                # Build a directive prompt with pre-computed recommendations
+                directive = self._build_directive(escalations, zone_results)
                 response = await asyncio.wait_for(
-                    self.agent.query(
-                        f"ESCALATION: Zone coordinators flagged the following issues.\n\n"
-                        f"Zone Analysis Results:\n{zone_context}\n\n"
-                        f"Violations:\n{summary}"
-                    ),
+                    self.agent.query(directive, escalation=True),
                     timeout=300,
                 )
                 logger.info("Strategic agent response: %s", response[:300])
@@ -159,6 +158,54 @@ class MonitoringLoop:
                 logger.warning("Strategic agent timed out")
             except Exception as e:
                 logger.error("Strategic agent error: %s", e)
+
+        # --- Publish to WebSocket via Event Bus ---
+        try:
+            import json as _json
+            nodes_data = []
+            for b, v in self.grid.get_bus_voltages().items():
+                x, y = 0, 0
+                if 'geo' in self.grid.net.bus.columns and not pd.isna(self.grid.net.bus.geo.at[b]):
+                    try:
+                        geo_dict = _json.loads(self.grid.net.bus.geo.at[b])
+                        # Assuming [lon, lat] or [x, y], scale for React Flow
+                        coords = geo_dict.get('coordinates', [0, 0])
+                        x = float(coords[0]) * 150
+                        y = float(coords[1]) * 150
+                    except Exception:
+                        pass
+                nodes_data.append({"id": b, "vm_pu": v, "x": x, "y": y, "zone": self._bus_to_zone(b)})
+
+            edges_data = []
+            for l, ld in self.grid.get_line_loadings().items():
+                try:
+                    from_b = int(self.grid.net.line.at[l, "from_bus"])
+                    to_b = int(self.grid.net.line.at[l, "to_bus"])
+                    edges_data.append({"id": l, "loading_percent": ld, "from_bus": from_b, "to_bus": to_b})
+                except Exception:
+                    pass
+            
+            # Simple zone health eval for demo UI
+            zone_health = {}
+            for z_id in self._coordinators.keys():
+                z_viols = len(zone_violations.get(z_id, []))
+                zone_health[z_id] = "critical" if z_viols > 2 else "warning" if z_viols > 0 else "healthy"
+
+            payload = {
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "total_generation_mw": self.grid.get_total_generation(),
+                "total_load_mw": self.grid.get_total_load(),
+                "total_losses_mw": self.grid.get_total_losses(),
+                "frequency_hz": self.grid.get_frequency(),
+                "nodes": nodes_data,
+                "edges": edges_data,
+                "zone_health": zone_health,
+                "violations": [v.model_dump(mode="json") for v in violations]
+            }
+            # Fire and forget publish
+            asyncio.create_task(event_bus.publish("grid_state", payload))
+        except Exception as e:
+            logger.error("Failed to publish grid_state: %s", e)
 
     async def _trigger_zone_rules(self, coordinator: ZoneCoordinator) -> dict:
         """Trigger deterministic PLC safety rules in a zone."""
@@ -242,10 +289,89 @@ class MonitoringLoop:
             groups[v.zone].append(v)
         return dict(groups)
 
+    def _build_directive(self, violations: list[ViolationEvent], zone_results: dict) -> str:
+        """Build a concrete action directive for the strategic agent."""
+        # Count violation types using correct ViolationEvent field names
+        low_v  = [v for v in violations if "low"     in v.violation_type]
+        high_v = [v for v in violations if "high"    in v.violation_type]
+        thermal = [v for v in violations if "thermal" in v.violation_type]
+
+        def _bus(v: ViolationEvent) -> str:
+            return v.affected_components[0] if v.affected_components else "?"
+
+        actions = []
+        gen_ids  = [f"gen_{g}"  for g in self.grid.net.gen.index]
+        load_ids = [f"load_{l}" for l in self.grid.net.load.index]
+
+        if low_v:
+            current_p = float(self.grid.net.gen.p_mw.iloc[0])
+            max_p = float(self.grid.net.gen.max_p_mw.iloc[0]) if "max_p_mw" in self.grid.net.gen.columns else current_p * 1.5
+            target_p  = min(current_p + 10.0, max_p)
+            primary_gen = gen_ids[0] if gen_ids else "gen_0"
+            actions.append(
+                f"  • Call actuate_device(device_id='{primary_gen}', action='set_output', "
+                f"parameters={{'p_mw': {target_p:.1f}}}) "
+                f"→ Raises voltage by injecting {target_p - current_p:.1f} MW more."
+            )
+            if len(gen_ids) > 1:
+                current_p2 = float(self.grid.net.gen.p_mw.iloc[1])
+                max_p2 = float(self.grid.net.gen.max_p_mw.iloc[1]) if "max_p_mw" in self.grid.net.gen.columns else current_p2 * 1.5
+                target_p2 = min(current_p2 + 5.0, max_p2)
+                actions.append(
+                    f"  • Also consider actuate_device(device_id='{gen_ids[1]}', action='set_output', "
+                    f"parameters={{'p_mw': {target_p2:.1f}}}) "
+                    f"→ Additional support from secondary generator."
+                )
+
+        if thermal:
+            critical_loads = load_ids[:2] if len(load_ids) >= 2 else load_ids
+            for lid in critical_loads:
+                actions.append(
+                    f"  • Call actuate_device(device_id='{lid}', action='scale', "
+                    f"parameters={{'scale_factor': 0.8}}) "
+                    f"→ Reduce load by 20% to relieve line overload."
+                )
+
+        if not actions:
+            primary_gen = gen_ids[0] if gen_ids else "gen_0"
+            actions.append(
+                f"  • Call actuate_device(device_id='{primary_gen}', action='ramp', "
+                f"parameters={{'delta_mw': 5.0}}) → Generic voltage support."
+            )
+
+        low_buses  = [_bus(v) for v in low_v]
+        high_buses = [_bus(v) for v in high_v]
+        thermal_lines = [_bus(v) for v in thermal]
+        v_table = self._format_violations(violations)
+        action_block = "\n".join(actions)
+
+        # Build real device ID inventory so LLM can't hallucinate IDs
+        real_gen_ids  = [f"gen_{g}"  for g in self.grid.net.gen.index]
+        real_load_ids = [f"load_{l}" for l in self.grid.net.load.index]
+        gen_status = ", ".join(
+            f"{gid}={float(self.grid.net.gen.p_mw.at[g]):.1f}MW"
+            for gid, g in zip(real_gen_ids, self.grid.net.gen.index)
+        )
+
+        return (
+            f"GRID EMERGENCY — {len(violations)} violations across {len(zone_results)} zones.\n"
+            f"Low voltage: {low_buses} | High voltage: {high_buses} | Thermal: {thermal_lines}\n\n"
+            f"AVAILABLE DEVICES (use ONLY these exact IDs):\n"
+            f"  Generators: {', '.join(real_gen_ids)}  (current setpoints: {gen_status})\n"
+            f"  Loads: {', '.join(real_load_ids[:8])}{'...' if len(real_load_ids) > 8 else ''}\n\n"
+            f"Violations:\n{v_table}\n\n"
+            f"PRE-COMPUTED CORRECTIVE ACTIONS (call these tools NOW):\n{action_block}\n\n"
+            f"Execute the first action immediately by calling the actuate_device tool."
+        )
+
     def _format_violations(self, violations: list[ViolationEvent]) -> str:
         lines = []
         for v in violations:
-            lines.append(f"- [{v.severity.upper()}] {v.message} (zone: {v.zone})")
+            comp = v.affected_components[0] if v.affected_components else "?"
+            lines.append(
+                f"  [{v.severity.upper()}] zone={v.zone} component={comp} "
+                f"type={v.violation_type} val={v.current_value:.4f} limit={v.limit_value:.2f}"
+            )
         return "\n".join(lines)
 
     @staticmethod

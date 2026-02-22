@@ -19,6 +19,8 @@ from src.common.config import get_settings
 from src.common.llm_client import LLMClient, create_strategic_llm
 from src.common.models import AgentDecision
 from src.strategic.memory import ContextMemory
+from src.api.event_bus import event_bus
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -104,37 +106,83 @@ class StrategicAgent:
         )
         return len(self._tools)
 
+    @property
+    def actuator_tools(self) -> list[dict]:
+        """Return only actuator tools to avoid overflowing the LLM context window.
+
+        Read-only sensor tools are irrelevant during emergency escalation and
+        bloat the prompt (107 tools ≈ 21k tokens vs 5 actuators ≈ 2k tokens).
+        """
+        # Keep tools from actuator/physical servers only (not sensors or coordinators)
+        ACTUATOR_KEYWORDS = ("actuate_device", "list_devices", "get_device_status")
+        filtered = [t for t in self._tools if t["function"]["name"].split("_")[-1] in {"actuate_device", "list_devices", "get_device_status"} or any(k in t["function"]["name"] for k in ("actuator", "generator", "breaker", "load_controller", "regulator", "storage"))]
+        if not filtered:
+            # Fallback: any tool whose description mentions actuating
+            filtered = [t for t in self._tools if "actuate" in t["function"].get("description", "").lower()]
+        logger.debug("Filtered to %d actuator tools (from %d total)", len(filtered), len(self._tools))
+        return filtered or self._tools[:10]  # last resort: first 10
+
     # ------------------------------------------------------------------
     # Query / Command
     # ------------------------------------------------------------------
 
-    async def query(self, user_message: str) -> str:
-        """Process a natural language query and return the agent's response."""
+    async def query(self, user_message: str, *, escalation: bool = False) -> str:
+        """Process a natural language query and return the agent's response.
+        
+        Args:
+            user_message: The message or directive to process.
+            escalation: If True, uses the filtered actuator-only tool list to
+                avoid context window overflow with 107 full tool definitions.
+        """
         recent_decisions = self.memory.get_recent_decisions(5)
         context_summary = self.memory.get_context_summary()
         context_block = self._build_context(context_summary, recent_decisions)
 
         full_message = f"{context_block}\n\n{user_message}" if context_block else user_message
 
+        asyncio.create_task(event_bus.publish("agent_log", {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "level": "analyzing",
+            "message": f"Processing user query: {user_message[:200]}"
+        }))
+
+        # Use focused actuator tools during escalation to avoid context overflow
+        tools_to_use = self.actuator_tools if escalation else self._tools
+        logger.info("Querying LLM with %d tools (escalation=%s)", len(tools_to_use), escalation)
+
         final_text = await self.llm.tool_loop(
             user_message=full_message,
-            tools=self._tools,
+            tools=tools_to_use,
             tool_executor=self._execute_tool,
+            tool_choice="required" if escalation and tools_to_use else None,
         )
 
         decision = AgentDecision(
             decision_id=uuid.uuid4().hex[:12],
-            trigger=user_message,
+            trigger=user_message[:200],
             reasoning=final_text[:500],
         )
         self._audit_log.append(decision)
         self.memory.store_decision(decision)
+
+        asyncio.create_task(event_bus.publish("agent_log", {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "level": "decision",
+            "message": final_text or "(tool calls executed — no summary text)"
+        }))
 
         return final_text
 
     async def _execute_tool(self, tool_name: str, arguments: dict) -> dict:
         """Execute a tool call by routing to the actual in-process server object."""
         logger.info("Tool call: %s(%s)", tool_name, json.dumps(arguments, default=str)[:200])
+        
+        asyncio.create_task(event_bus.publish("agent_log", {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "level": "tool_call",
+            "message": f"Calling component: {tool_name}",
+            "data": arguments
+        }))
 
         server_id = self._tool_server_map.get(tool_name)
         original_name = self._tool_name_map.get(tool_name, tool_name)

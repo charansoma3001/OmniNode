@@ -220,16 +220,44 @@ class PowerGridSimulation:
         return False
 
     def validate_action(self, action_fn, *args, **kwargs) -> dict:
-        """Run an action in sandbox mode: save → execute → check → restore.
+        """Run an action in sandbox mode: save → execute → check delta → restore.
 
-        Returns dict with 'safe' bool and violation details.
+        Only blocks actions that introduce NEW violations beyond pre-existing ones.
+        This is critical for corrective actions (e.g. ramping a generator when the
+        grid is already in a degraded state with violations).
         """
         snapshot_idx = self.save_snapshot()
         try:
+            # Capture pre-action violation fingerprints
+            pre_violations = self._check_violations()
+            pre_components = {v["component"] for v in pre_violations}
+
             action_fn(*args, **kwargs)
-            violations = self._check_violations()
-            safe = len(violations) == 0
-            return {"safe": safe, "violations": violations}
+
+            post_violations = self._check_violations()
+
+            # Only flag violations on components that were NOT already in violation
+            new_violations = [v for v in post_violations if v["component"] not in pre_components]
+
+            # Also block if a metric got significantly WORSE on an existing violation
+            worsened = []
+            pre_by_comp = {v["component"]: v for v in pre_violations}
+            for v in post_violations:
+                if v["component"] in pre_by_comp:
+                    old_val = pre_by_comp[v["component"]]["value"]
+                    new_val = v["value"]
+                    # Worsened if deviation from limit grew by >5%
+                    if abs(new_val - 1.0) > abs(old_val - 1.0) + 0.05:
+                        worsened.append(v)
+
+            blocking = new_violations + worsened
+            safe = len(blocking) == 0
+            return {
+                "safe": safe,
+                "violations": blocking,
+                "pre_existing_violations": len(pre_violations),
+                "note": "Only new/worsened violations are blocking; pre-existing violations are ignored.",
+            }
         finally:
             self.restore_snapshot(snapshot_idx)
 
