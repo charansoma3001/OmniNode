@@ -134,3 +134,8 @@ site/
 # OS
 .DS_Store
 Thumbs.db
+
+# Large Media
+*.mov
+*.mp4
+*.png

@@ -236,7 +236,12 @@ class ZoneCoordinator:
 
     def _detect_violations(self) -> dict:
         violations = []
+        # Buses connected to ext_grid have fixed voltage setpoints — skip them
+        slack_buses = set(self.grid.net.ext_grid.bus.tolist())
+
         for b in self.buses:
+            if b in slack_buses:
+                continue  # Slack bus voltage is an external reference, not a violation
             try:
                 vm = self.grid.get_bus_voltage(b)
                 if vm < self.protection_settings["under_voltage_pu"]:

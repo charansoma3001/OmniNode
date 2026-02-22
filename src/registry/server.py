@@ -94,7 +94,7 @@ async def bootstrap_real_system() -> None:
 
     memory = ContextMemory()
     guardian = SafetyGuardian()
-    agent = StrategicAgent(memory=memory, servers=all_servers)
+    agent = StrategicAgent(memory=memory, servers=all_servers, guardian=guardian)
     
     # Store globally so the websocket /ws/commands can call `agent.query()`
     ws.active_agent = agent

@@ -83,17 +83,32 @@ class BaseActuatorServer(ABC):
     # ------------------------------------------------------------------
 
     def _register_tools(self) -> None:
+        # Build action enum from subclass if available
+        valid_actions = getattr(self, "_valid_actions", None)
+        action_enum = valid_actions or []
+        action_description = (
+            f"Action to perform. Valid values: {', '.join(action_enum)}"
+            if action_enum
+            else "Action to perform"
+        )
+        action_schema: dict = {"type": "string", "description": action_description}
+        if action_enum:
+            action_schema["enum"] = action_enum
+
         @self.mcp.list_tools()
         async def list_tools() -> list[Tool]:
             return [
                 Tool(
                     name="control",
-                    description=f"Execute a control action on a {self.device_type}",
+                    description=(
+                        f"Execute a control action on a {self.device_type}. "
+                        + (f"Valid actions: {', '.join(action_enum)}." if action_enum else "")
+                    ),
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "device_id": {"type": "string", "description": "Device identifier"},
-                            "action": {"type": "string", "description": "Action to perform"},
+                            "action": action_schema,
                             "parameters": {"type": "object", "description": "Action parameters"},
                             "validate": {"type": "boolean", "description": "Run sandbox validation first", "default": True},
                         },

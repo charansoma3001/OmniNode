@@ -12,6 +12,7 @@ from typing import Any
 
 import openai
 
+from src.api.event_bus import event_bus
 from src.common.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ class LLMClient:
         if not raw_url.endswith("/v1") and "11434" in raw_url:
             raw_url = f"{raw_url.rstrip('/')}/v1"
 
-        self.client = openai.OpenAI(
+        self.client = openai.AsyncOpenAI(
             api_key=api_key or settings.llm_api_key,
             base_url=raw_url,
         )
@@ -51,7 +52,7 @@ class LLMClient:
     # Simple completion (no tools)
     # ------------------------------------------------------------------
 
-    def complete(self, user_message: str, *, temperature: float = 0.3) -> str:
+    async def complete(self, user_message: str, *, temperature: float = 0.3) -> str:
         """Single-turn completion with no tool calling."""
         settings = get_settings()
         messages = []
@@ -59,10 +60,9 @@ class LLMClient:
             messages.append({"role": "system", "content": self.system_prompt})
         messages.append({"role": "user", "content": user_message})
 
-        # Ollama-specific options via OpenAI-compatible API
         extra_body = {"options": {"num_ctx": settings.llm_context_window}}
 
-        resp = self.client.chat.completions.create(
+        resp = await self.client.chat.completions.create(
             model=self.model,
             messages=messages,
             temperature=temperature,
@@ -101,7 +101,7 @@ class LLMClient:
         extra_body = {"options": {"num_ctx": settings.llm_context_window}}
 
         for _iteration in range(max_iterations):
-            resp = self.client.chat.completions.create(
+            resp = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 tools=tools if tools else None,
@@ -118,35 +118,27 @@ class LLMClient:
                     except json.JSONDecodeError:
                         args = {}
 
-                    # Stream the tool call to the Brain Scanner UI
-                    try:
-                        import asyncio as _asyncio
-                        from src.api.event_bus import event_bus as _bus
-                        _asyncio.get_event_loop().call_soon_threadsafe(
-                            lambda fn=tc.function.name, a=args: _asyncio.ensure_future(
-                                _bus.publish("agent_log", {
-                                    "level": "tool_call",
-                                    "message": f"🔧 CALLING: {fn}({json.dumps(a)})"
-                                })
-                            )
-                        )
-                    except Exception:
-                        pass
+                    # Stream tool call to Brain Scanner UI
+                    args_str = ", ".join(f"{k}={v}" for k, v in args.items())
+                    await event_bus.publish("agent_log", {
+                        "level": "tool_call",
+                        "message": f"CALLING: {tc.function.name}({args_str})"
+                    })
 
                     result = await tool_executor(tc.function.name, args)
 
-                    # Stream tool result back to Brain Scanner UI
-                    try:
-                        _asyncio.get_event_loop().call_soon_threadsafe(
-                            lambda r=result, fn=tc.function.name: _asyncio.ensure_future(
-                                _bus.publish("agent_log", {
-                                    "level": "tool_result",
-                                    "message": f"✅ {fn} → {json.dumps(r, default=str)[:200]}"
-                                })
-                            )
-                        )
-                    except Exception:
-                        pass
+                    # Stream tool result to Brain Scanner UI
+                    if isinstance(result, dict):
+                        summary_msg = result.get("message", result.get("error", "Success"))
+                    elif hasattr(result, "message"):
+                        summary_msg = result.message
+                    else:
+                        summary_msg = "Success"
+
+                    await event_bus.publish("agent_log", {
+                        "level": "decision",
+                        "message": f"COMPLETED: {tc.function.name} → {summary_msg}"
+                    })
 
                     messages.append({
                         "role": "tool",

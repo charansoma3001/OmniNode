@@ -9,11 +9,29 @@ from src.simulation.power_grid import PowerGridSimulation
 
 class VoltageRegulatorServer(BaseActuatorServer):
     """MCP server for voltage regulation via shunt capacitor banks."""
+    _valid_actions = ["activate", "deactivate", "emergency_stop"]
 
     def __init__(self, grid: PowerGridSimulation, zone: str = "system"):
         super().__init__(device_type="voltage_regulator", grid=grid, zone=zone)
 
+    # Aliases → normalized action names so LLM variants all work
+    _ACTION_ALIASES = {
+        "activate": "activate",
+        "enable": "activate",
+        "on": "activate",
+        "bank_toggle": "activate",
+        "switch_on": "activate",
+        "open": "activate",
+        "close": "deactivate",   # closing the breaker disconnects capacitor from perspective
+        "deactivate": "deactivate",
+        "disable": "deactivate",
+        "off": "deactivate",
+        "switch_off": "deactivate",
+        "emergency_stop": "deactivate",
+    }
+
     def _execute_action(self, device_id: str, action: str, parameters: dict) -> ActuatorResponse:
+        action = self._ACTION_ALIASES.get(action, action)  # normalize
         shunt_id = int(device_id.replace("shunt_", ""))
         prev = bool(self.grid.net.shunt.in_service.at[shunt_id])
 
@@ -55,6 +73,7 @@ class VoltageRegulatorServer(BaseActuatorServer):
         }
 
     def _validate_in_sandbox(self, device_id: str, action: str, parameters: dict) -> dict:
+        action = self._ACTION_ALIASES.get(action, action)  # normalize before validation
         shunt_id = int(device_id.replace("shunt_", ""))
         in_service = action == "activate"
 

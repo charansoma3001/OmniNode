@@ -27,6 +27,10 @@ class EventBus:
 
     async def publish(self, channel: str, message: dict | str) -> None:
         """Publish a message to all subscribers of a channel."""
+        if isinstance(message, dict) and "timestamp" not in message:
+            from datetime import datetime
+            message["timestamp"] = datetime.now().isoformat()
+            
         async with self._instance._lock:
             queues = self._instance._channels[channel][:] # Copy the list of queues
         

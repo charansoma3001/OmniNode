@@ -97,6 +97,7 @@ async def websocket_commands(websocket: WebSocket) -> None:
                         from src.simulation.scenarios import run_scenario
                         logger.info(f"Triggering real scenario: {payload}")
                         run_scenario(payload, active_grid, persist=True)
+                        asyncio.create_task(event_bus.publish("grid_state", active_grid.get_state()))
                         asyncio.create_task(event_bus.publish("agent_log", {
                             "level": "warning",
                             "message": f"CRITICAL: System administrator triggered scenario '{payload}'"

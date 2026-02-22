@@ -38,6 +38,7 @@ class StrategicAgent:
         memory: ContextMemory | None = None,
         llm: LLMClient | None = None,
         servers: list | None = None,
+        guardian: Any | None = None,
     ):
         settings = get_settings()
         self.llm = llm or create_strategic_llm()
@@ -48,6 +49,7 @@ class StrategicAgent:
         self._tool_name_map: dict[str, str] = {}        # clean_tool_name -> original tool name
         self._server_objects: dict[str, Any] = {}        # server_id -> server object
         self._audit_log: list[AgentDecision] = []
+        self.guardian = guardian
 
         # Register live server objects for direct tool execution
         if servers:
@@ -201,18 +203,17 @@ class StrategicAgent:
                 "message": "Server not available for direct execution",
             }
 
-        # Call the server's tool handler directly
         try:
             # All our servers register tools via MCP's call_tool decorator.
             # We invoke them through the server's internal methods.
-            result = self._call_server_tool(server, original_name, arguments)
+            result = await self._call_server_tool(server, original_name, arguments)
             logger.info("Tool result [%s]: %s", tool_name, json.dumps(result, default=str)[:300])
             return result
         except Exception as e:
             logger.error("Tool execution failed [%s]: %s", tool_name, e)
             return {"error": str(e), "tool": tool_name}
 
-    def _call_server_tool(self, server: Any, tool_name: str, arguments: dict) -> dict:
+    async def _call_server_tool(self, server: Any, tool_name: str, arguments: dict) -> dict:
         """Route a tool call to the correct handler method on the server object.
 
         Handles sensors, actuators, and coordinators by inspecting
@@ -254,6 +255,16 @@ class StrategicAgent:
         # ---- Actuator ----
         if hasattr(server, "device_type"):
             if tool_name == "control":
+                if self.guardian:
+                    # Run safety validation (which also publishes the event to UI)
+                    validation = await self.guardian.validate_command(arguments)
+                    if not validation.get("safe", False):
+                        logger.warning("Guardian intercepted and blocked action: %s", arguments)
+                        return {
+                            "executed": False,
+                            "reason": "Validation failed — action would cause violations",
+                            "validation": validation
+                        }
                 return server._handle_control(arguments)
             elif tool_name == "validate_action":
                 return server._handle_validate(arguments)

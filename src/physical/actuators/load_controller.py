@@ -9,11 +9,30 @@ from src.simulation.power_grid import PowerGridSimulation
 
 class LoadControllerServer(BaseActuatorServer):
     """MCP server for load control (demand response)."""
+    _valid_actions = ["scale", "shed", "restore", "emergency_stop"]
 
     def __init__(self, grid: PowerGridSimulation, zone: str = "system"):
         super().__init__(device_type="load_controller", grid=grid, zone=zone)
 
+    _ACTION_ALIASES = {
+        "shed": "shed",
+        "shed_load": "shed",
+        "disconnect": "shed",
+        "cutoff": "shed",
+        "drop": "shed",
+        "remove_load": "shed",
+        "scale": "scale",
+        "scale_load": "scale",
+        "adjust": "scale",
+        "reduce": "scale",
+        "decrease_load": "scale",
+        "restore": "restore",
+        "reconnect": "restore",
+        "emergency_stop": "emergency_stop",
+    }
+
     def _execute_action(self, device_id: str, action: str, parameters: dict) -> ActuatorResponse:
+        action = self._ACTION_ALIASES.get(action, action)  # normalize
         load_id = int(device_id.replace("load_", ""))
         prev_p = float(self.grid.net.load.p_mw.at[load_id])
 

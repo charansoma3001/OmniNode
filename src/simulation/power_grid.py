@@ -331,3 +331,50 @@ class PowerGridSimulation:
                     zone_lines[zone].append(line_id)
                     break
         return zone_lines
+
+    def get_state(self, zone_health: dict | None = None) -> dict:
+        """Generate a JSON-serializable dict of the current grid state for the UI."""
+        from datetime import datetime
+        import json as _json
+
+        nodes_data = []
+        for b, v in self.get_bus_voltages().items():
+            x, y = 0, 0
+            if 'geo' in self.net.bus.columns and not pd.isna(self.net.bus.geo.at[b]):
+                try:
+                    geo_dict = _json.loads(self.net.bus.geo.at[b])
+                    coords = geo_dict.get('coordinates', [0, 0])
+                    x = float(coords[0]) * 150
+                    y = float(coords[1]) * 150
+                except Exception:
+                    pass
+            
+            # Find which zone this bus belongs to
+            bus_zone = "system"
+            for z_name, z_buses in self.get_zone_buses().items():
+                if b in z_buses:
+                    bus_zone = z_name
+                    break
+
+            nodes_data.append({"id": b, "vm_pu": v, "x": x, "y": y, "zone": bus_zone})
+
+        edges_data = []
+        for l, ld in self.get_line_loadings().items():
+            try:
+                from_b = int(self.net.line.at[l, "from_bus"])
+                to_b = int(self.net.line.at[l, "to_bus"])
+                edges_data.append({"id": l, "loading_percent": ld, "from_bus": from_b, "to_bus": to_b})
+            except Exception:
+                pass
+
+        return {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "total_generation_mw": self.get_total_generation(),
+            "total_load_mw": self.get_total_load(),
+            "total_losses_mw": self.get_total_losses(),
+            "frequency_hz": self.get_frequency(),
+            "nodes": nodes_data,
+            "edges": edges_data,
+            "zone_health": zone_health or {},
+            "violations": self._check_violations()
+        }

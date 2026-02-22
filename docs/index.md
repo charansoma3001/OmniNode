@@ -33,12 +33,12 @@ graph TD
 
 ### The Component Roster
 The system runs the following roster of interconnected servers and agents:
-- **1× Strategic Agent**: A master LLM (e.g., `llama3.1`) that reasons over the entire grid state, processes human commands, and acts as the ultimate decider for high-risk operations.
+- **1× Strategic Agent**: A master LLM (e.g., `qwen2.5:14b`) that reasons over the entire grid state, processes human commands, and acts as the ultimate decider for high-risk operations.
 - **3× Zone Coordinators (PLCs)**: Deterministic, rule-based agents assigned to geographic zones (Buses 0–9, 10–19, 20–29). They handle local load balancing and voltage regulation autonomously using hard-coded safety rules (IEC 60255).
 - **11× Sensor MCP Servers**: Continuous readers for Voltage, Current, Transformer Temperature, Power Quality (THD), and System Frequency.
 - **5× Actuator MCP Servers**: Interfaces for Circuit Breakers, Generators, Load Controllers, Voltage Regulators (shunt capacitors), and Energy Storage.
-- **1× Safety Guardian Agent**: *(Optional config)* Validates actuator commands before execution.
-- **1× MCP Registry**: A lightweight discovery service (`FastAPI`) where all sensor, actuator, and coordinator tools are registered for discovery by the Strategic Agent.
+- **1× Safety Guardian Agent**: A dedicated safety LLM (`llama-guard3`) that validates every actuator command before execution. If a command is deemed unsafe, it is blocked and the Strategic Agent must re-plan.
+- **1× MCP Registry**: A lightweight FastAPI discovery service where all sensor, actuator, and coordinator tools are registered for discovery by the Strategic Agent.
 
 ---
 
@@ -47,10 +47,13 @@ The system runs the following roster of interconnected servers and agents:
 ```text
 mcp-multi-agent/
 ├── pyproject.toml             # Python dependencies (uv)
+├── mkdocs.yml                 # Zensical documentation configuration
 ├── .env                       # Environment configuration (LLMs, API keys)
 ├── scripts/
-│   └── start_all.py           # Main orchestrator script to launch all servers
+│   ├── start_all.py           # Legacy CLI-only orchestrator
+│   └── start_warroom.py       # War Room launcher (backend + WebSocket bridge)
 ├── src/
+│   ├── api/                   # WebSocket bridge, Event Bus, mock streams
 │   ├── common/                # Shared settings, LLM client wrapper, data models
 │   ├── registry/              # FastAPI MCP registry server (`mcp-registry`)
 │   ├── simulation/            # IEEE 30-bus Pandapower digital twin & data generation
@@ -58,9 +61,12 @@ mcp-multi-agent/
 │   │   ├── sensors/           # Voltage, current, temperature, frequency MCP servers
 │   │   └── actuators/         # Breaker, generator, capacitor MCP servers
 │   ├── coordination/          # Zone Coordinator MCP servers & optimization heuristics
-│   ├── strategic/             # Strategic Agent, CLI, Memory, and Monitoring Loop
-│   ├── dashboard/             # Plotly Dash real-time monitoring UI
+│   ├── strategic/             # Strategic Agent, Safety Guardian, CLI, Memory, Monitor
 │   └── domains/               # Domain adapters wrapping the simulation for MCP
+├── dashboard/                 # War Room Frontend (Next.js / React Flow / shadcn/ui)
+│   └── src/
+│       ├── components/war-room/ # TopologyMap, BrainScanner, GuardianPanel, CommandBar
+│       └── hooks/             # useGridState, useAgentLogs, useGuardianEvents
 └── tests/                     # Unit and integration tests
 ```
 
@@ -107,27 +113,24 @@ git clone https://github.com/charansoma3001/OmniNode && cd OmniNode && uv sync &
 
 To run the full suite, you need to open multiple terminal instances. The project leverages `uv run` to ensure scripts execute within the correct virtual environment path.
 
-**Terminal 1: Start the MCP Service Registry**
-The registry acts as the phonebook for all tools.
+**Terminal 1: Launch the War Room Backend + Frontend**
+The `start_warroom.py` script boots the FastAPI registry, all MCP servers, the monitoring loop, and the WebSocket bridge in one command.
 ```bash
-uv run mcp-registry
+# Real LLM mode (requires Ollama)
+python scripts/start_warroom.py --real
+
+# Demo mode (no LLM required, pre-scripted events)
+python scripts/start_warroom.py
 ```
 
-**Terminal 2: Launch the Digital Twin & Agents**
-This script initializes the IEEE 30-bus simulation, generates MCP server wrappers for all components, registers them, and starts the asynchronous monitoring loop.
+**Terminal 2: Launch the War Room Frontend Dashboard**
+The interactive Next.js dashboard at `http://localhost:3000`.
 ```bash
-uv run python scripts/start_all.py
+cd dashboard && npm run dev
 ```
 
-**Terminal 3: Launch the Real-Time Dashboard**
-View the grid state visually (Voltage bars, line loading, zone health).
-```bash
-uv run mcp-dashboard
-# Access at http://localhost:8050
-```
-
-**Terminal 4: Launch the Natural Language Interactive CLI**
-The primary interface to chat with the Strategic Agent and issue commands.
+**Terminal 3 (Optional): Launch the CLI Interface**
+The legacy natural language CLI for direct agent interaction.
 ```bash
 uv run mcp-cli
 ```
@@ -176,5 +179,24 @@ Here is what happens every interval (e.g., 30 seconds):
 
 Because the system is built strictly using the **Model Context Protocol**, adding new capabilities is incredibly straightforward:
 
-1. **New Sensors/Actuators**: Create a new class extending `mcp.server.Server`. Add `@self.mcp.list_tools()` and `@self.mcp.call_tool()` decorators. Register it in the `PowerGridAdapter`.
-2. **New Domains**: You can replace `src/simulation/power_grid.py` with an adapter for a robotics system or a satellite network. As long as they expose MCP servers, the Strategic Agent LLM can discover and operate them.
+1. **New Sensors/Actuators**: Create a new class extending `BaseSensor` or `BaseActuator`. Implement the required handlers and register in the server startup flow.
+2. **New Domains**: Replace `src/simulation/power_grid.py` with an adapter for a robotics system or a satellite network. As long as they expose MCP servers, the Strategic Agent LLM can discover and operate them.
+3. **New Actuator Actions**: Add entries to `_ACTION_ALIASES` in the actuator class to normalise LLM-generated action names.
+
+---
+
+## 🖥️ War Room Dashboard
+
+The **War Room** is a real-time, interactive command center that provides absolute observability into the autonomous operations of the multi-agent system. It bridges the physical layer and the cognitive layer into a single visual interface.
+
+See the [War Room UI](war-room.md) documentation for full architectural details.
+
+**Key widgets:**
+
+| Widget | Description |
+|---|---|
+| **Topology Map** | React Flow IEEE 30-bus network with live color-coded node health |
+| **Brain Scanner** | Hacker-styled terminal streaming the Strategic Agent's inner monologue |
+| **Guardian Panel** | Real-time log of Safety Guardian approve/block decisions |
+| **KPI Cards** | Generation, load, frequency, and violation counts |
+| **Command Bar** | Natural language queries and scenario injection |

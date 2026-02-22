@@ -28,7 +28,7 @@ class SafetyGuardian:
         self._validation_log: list[dict] = []
         logger.info("Safety Guardian initialized → model=%s", self.llm.model)
 
-    def validate_command(self, command: dict) -> dict:
+    async def validate_command(self, command: dict) -> dict:
         """Evaluate a proposed actuator command.
 
         Args:
@@ -54,7 +54,7 @@ Respond ONLY with a JSON object (no markdown):
 {{"safe": true/false, "risk_level": "LOW|MEDIUM|HIGH|CRITICAL", "reasoning": "...", "conditions": [...]}}"""
 
         try:
-            raw = self.llm.complete(prompt, temperature=0.1)
+            raw = await self.llm.complete(prompt, temperature=0.1)
             # Try to parse JSON from the response
             # Strip any markdown code fences
             clean = raw.strip()
@@ -63,7 +63,13 @@ Respond ONLY with a JSON object (no markdown):
                 clean = clean.rsplit("```", 1)[0] if "```" in clean else clean
                 clean = clean.strip()
 
-            result = json.loads(clean)
+            lower_clean = clean.lower()
+            if lower_clean == "safe" or lower_clean.startswith("safe\n"):
+                result = {"safe": True, "risk_level": "LOW", "reasoning": "Action evaluated as safe.", "conditions": []}
+            elif lower_clean.startswith("unsafe"):
+                result = {"safe": False, "risk_level": "HIGH", "reasoning": f"Action blocked by safeguard model: {clean}", "conditions": []}
+            else:
+                result = json.loads(clean)
         except (json.JSONDecodeError, Exception) as e:
             logger.warning("Guardian response not parseable: %s — raw: %s", e, raw[:200] if 'raw' in dir() else "N/A")
             result = {

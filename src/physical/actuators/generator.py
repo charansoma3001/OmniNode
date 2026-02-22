@@ -9,6 +9,7 @@ from src.simulation.power_grid import PowerGridSimulation
 
 class GeneratorServer(BaseActuatorServer):
     """MCP server for generator dispatch control."""
+    _valid_actions = ["set_output", "ramp", "emergency_stop"]
 
     def __init__(self, grid: PowerGridSimulation, zone: str = "system"):
         super().__init__(device_type="generator", grid=grid, zone=zone)

@@ -46,6 +46,7 @@ plugins:
 nav:
   - Home: index.md
   - Core Concepts: core-concepts.md
+  - War Room UI: war-room.md
   - Configuration: configuration.md
   - Developer Guide: development.md
   - API Reference: api.md
