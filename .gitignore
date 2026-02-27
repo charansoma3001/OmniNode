@@ -7,7 +7,6 @@ __pycache__/
 *.so
 
 # Distribution / packaging
-# .Python
 build/
 develop-eggs/
 dist/
@@ -48,63 +47,6 @@ coverage.xml
 .pytest_cache/
 pytest_debug.log
 
-# Translations
-*.mo
-*.pot
-
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-.python-version
-
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in git.
-#   However, in case of collaboration, if you choose to not include it:
-# Pipfile.lock
-
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in git.
-# poetry.lock
-
-# pdm
-.pdm.toml
-.pdm-python
-.pdm-build/
-
-# PEP 582; used by e.g. github.com/fannheyward/coc-pyright
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
 # Environments
 .env
 .venv
@@ -139,3 +81,14 @@ Thumbs.db
 *.mov
 *.mp4
 *.png
+
+# --- Backend Specific ---
+backend/.venv
+backend/mcp_multi_agent.egg-info/
+
+# --- Frontend Specific ---
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.env*.local
