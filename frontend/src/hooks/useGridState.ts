@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import useWebSocket, { ReadyState } from 'react-use-websocket';
+import { wsUrl } from '@/lib/config';
 
 export interface GridPayload {
     timestamp: string;
@@ -17,7 +18,7 @@ export function useGridState() {
     const [gridData, setGridData] = useState<GridPayload | null>(null);
 
     // Auto-reconnecting WebSocket
-    const { lastJsonMessage, readyState } = useWebSocket('ws://localhost:8000/ws/grid_state', {
+    const { lastJsonMessage, readyState } = useWebSocket(wsUrl('/ws/grid_state'), {
         shouldReconnect: () => true,
         reconnectInterval: 3000,
         reconnectAttempts: 100,

@@ -14,6 +14,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!frontend/src/lib/
 lib64/
 parts/
 sdist/
@@ -49,6 +50,7 @@ pytest_debug.log
 
 # Environments
 .env
+!.env.example
 .venv
 env/
 venv/

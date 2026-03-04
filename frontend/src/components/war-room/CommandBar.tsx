@@ -3,11 +3,12 @@
 import { useState } from "react";
 import useWebSocket from "react-use-websocket";
 import { Send } from "lucide-react";
+import { wsUrl } from "@/lib/config";
 
 export function CommandBar() {
     const [input, setInput] = useState("");
 
-    const { sendMessage } = useWebSocket('ws://localhost:8000/ws/commands', {
+    const { sendMessage } = useWebSocket(wsUrl('/ws/commands'), {
         shouldReconnect: () => true,
     });
 

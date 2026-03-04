@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import useWebSocket from 'react-use-websocket';
+import { wsUrl } from '@/lib/config';
 
 export interface AgentLog {
     timestamp: string;
@@ -11,7 +12,7 @@ export interface AgentLog {
 export function useAgentLogs() {
     const [logs, setLogs] = useState<AgentLog[]>([]);
 
-    const { lastJsonMessage } = useWebSocket('ws://localhost:8000/ws/agent_logs', {
+    const { lastJsonMessage } = useWebSocket(wsUrl('/ws/agent_logs'), {
         shouldReconnect: () => true,
         reconnectInterval: 3000,
     });
