@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Clock, Zap, Activity, AlertTriangle } from 'lucide-react';
+import { Clock, Zap, Activity, AlertTriangle, Github } from 'lucide-react';
 import { GridPayload } from '@/hooks/useGridState';
 
 interface HeaderProps {
@@ -55,6 +55,14 @@ export const Header: React.FC<HeaderProps> = ({ gridData }) => {
       </div>
 
       <div className="flex items-center gap-4">
+        <a
+          href="https://github.com/charansoma/OmniNode"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-center w-8 h-8 rounded bg-[#0d0d12] border border-[#1e1e24] text-zinc-500 hover:text-white hover:border-zinc-500 transition-colors"
+        >
+          <Github className="w-4 h-4" />
+        </a>
         <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded">
           <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
           <span className="text-[10px] font-bold text-emerald-400 tracking-widest uppercase">
