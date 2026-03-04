@@ -81,9 +81,10 @@ export const GeographicCoverageMap: React.FC<GeographicCoverageMapProps> = ({ no
       const radiusPx = (radiusKm / 111) * (width * 0.8 / 360) * Math.PI;
 
       const color = node.type === 'DOMESTIC' ? '#3b82f6' :
-                    node.type === 'OVERSEAS' ? '#8b5cf6' :
-                    node.type === 'MARITIME' ? '#f59e0b' :
-                    '#ec4899';
+        node.type === 'OVERSEAS' ? '#8b5cf6' :
+          node.type === 'MARITIME' ? '#06b6d4' :
+            node.type === 'SPACE' ? '#a855f7' :
+              '#f59e0b';
 
       // Coverage circle
       coverageG.append('circle')
@@ -106,7 +107,12 @@ export const GeographicCoverageMap: React.FC<GeographicCoverageMapProps> = ({ no
         .attr('stroke', '#fff')
         .attr('stroke-width', 1.5)
         .attr('cursor', 'pointer')
-        .attr('class', 'hover:scale-150 transition-transform duration-200')
+        .on('mouseover', function () {
+          d3.select(this).transition().duration(200).attr('r', 8);
+        })
+        .on('mouseout', function () {
+          d3.select(this).transition().duration(200).attr('r', 5);
+        })
         .on('click', (event) => {
           event.stopPropagation();
           setSelectedNode(node);
@@ -115,9 +121,9 @@ export const GeographicCoverageMap: React.FC<GeographicCoverageMapProps> = ({ no
 
       // Status dot
       const statusColor = node.status === 'ONLINE' ? '#10b981' :
-                          node.status === 'OFFLINE' ? '#ef4444' :
-                          node.status === 'DEGRADED' ? '#f59e0b' :
-                          '#3b82f6'; // SURGE
+        node.status === 'OFFLINE' ? '#ef4444' :
+          node.status === 'DEGRADED' ? '#f59e0b' :
+            '#3b82f6'; // SURGE
 
       coverageG.append('circle')
         .attr('cx', x)
@@ -134,9 +140,11 @@ export const GeographicCoverageMap: React.FC<GeographicCoverageMapProps> = ({ no
       { name: 'Iberian Shadow Zone', lng: -6.0, lat: 39.0 }
     ];
 
+    const gapsG = svg.append('g').attr('class', 'coverage-layer');
+
     gaps.forEach(gap => {
       const [x, y] = projection([gap.lng, gap.lat]) || [0, 0];
-      svg.append('g')
+      gapsG.append('g')
         .attr('transform', `translate(${x}, ${y})`)
         .call(g => {
           g.append('circle')
@@ -208,38 +216,67 @@ export const GeographicCoverageMap: React.FC<GeographicCoverageMapProps> = ({ no
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5 text-[8px] text-zinc-500 font-mono tracking-tighter">
-                <Signal className="w-2.5 h-2.5" /> SIGNAL
+          {selectedNode.telemetry.voltage !== undefined ? (
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-[8px] text-zinc-500 font-mono tracking-tighter">
+                  <Signal className="w-2.5 h-2.5" /> VOLTAGE
+                </div>
+                <div className="text-xs font-mono text-zinc-200">{selectedNode.telemetry.voltage}</div>
               </div>
-              <div className="text-xs font-mono text-zinc-200">{selectedNode.telemetry.signalStrength}%</div>
-            </div>
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5 text-[8px] text-zinc-500 font-mono tracking-tighter">
-                <Clock className="w-2.5 h-2.5" /> LATENCY
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-[8px] text-zinc-500 font-mono tracking-tighter">
+                  <Clock className="w-2.5 h-2.5" /> LOAD MW
+                </div>
+                <div className="text-xs font-mono text-zinc-200">{selectedNode.telemetry.loadMw}</div>
               </div>
-              <div className="text-xs font-mono text-zinc-200">{selectedNode.telemetry.latency}ms</div>
-            </div>
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5 text-[8px] text-zinc-500 font-mono tracking-tighter">
-                <HardDrive className="w-2.5 h-2.5" /> BW
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-[8px] text-zinc-500 font-mono tracking-tighter">
+                  <HardDrive className="w-2.5 h-2.5" /> GEN MW
+                </div>
+                <div className="text-xs font-mono text-zinc-200">{selectedNode.telemetry.genMw}</div>
               </div>
-              <div className="text-xs font-mono text-zinc-200">{selectedNode.telemetry.bandwidth}G</div>
-            </div>
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5 text-[8px] text-zinc-500 font-mono tracking-tighter">
-                <Cpu className="w-2.5 h-2.5" /> CPU
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-[8px] text-zinc-500 font-mono tracking-tighter">
+                  <Cpu className="w-2.5 h-2.5" /> FREQ
+                </div>
+                <div className="text-xs font-mono text-zinc-200">{selectedNode.telemetry.frequency}</div>
               </div>
-              <div className="text-xs font-mono text-zinc-200">{selectedNode.telemetry.cpuLoad}%</div>
             </div>
-          </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-[8px] text-zinc-500 font-mono tracking-tighter">
+                  <Signal className="w-2.5 h-2.5" /> SIGNAL
+                </div>
+                <div className="text-xs font-mono text-zinc-200">{selectedNode.telemetry.signalStrength}%</div>
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-[8px] text-zinc-500 font-mono tracking-tighter">
+                  <Clock className="w-2.5 h-2.5" /> LATENCY
+                </div>
+                <div className="text-xs font-mono text-zinc-200">{selectedNode.telemetry.latency}ms</div>
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-[8px] text-zinc-500 font-mono tracking-tighter">
+                  <HardDrive className="w-2.5 h-2.5" /> BW
+                </div>
+                <div className="text-xs font-mono text-zinc-200">{selectedNode.telemetry.bandwidth}G</div>
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-[8px] text-zinc-500 font-mono tracking-tighter">
+                  <Cpu className="w-2.5 h-2.5" /> CPU
+                </div>
+                <div className="text-xs font-mono text-zinc-200">{selectedNode.telemetry.cpuLoad}%</div>
+              </div>
+            </div>
+          )}
 
           <div className={`px-2 py-1 rounded text-[9px] font-bold tracking-widest text-center
             ${selectedNode.status === 'ONLINE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
               selectedNode.status === 'SURGE' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
-              selectedNode.status === 'DEGRADED' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-              'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                selectedNode.status === 'DEGRADED' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                  'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
             STATUS: {selectedNode.status}
           </div>
         </div>

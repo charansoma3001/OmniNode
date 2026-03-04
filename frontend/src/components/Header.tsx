@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Clock, Zap, Activity, AlertTriangle, Github } from 'lucide-react';
+import { Clock, Zap, Activity, AlertTriangle, Github, Radio, Globe, Cpu } from 'lucide-react';
 import { GridPayload } from '@/hooks/useGridState';
 
 interface HeaderProps {
@@ -13,16 +13,19 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ gridData }) => {
   const [time, setTime] = useState(new Date());
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    const timer = setInterval(() => setTime(new Date()), 1000);
+    const timer = setInterval(() => { setTime(new Date()); setTick(t => t + 1); }, 1000);
     return () => clearInterval(timer);
   }, []);
 
+  const jitter = (base: number, range: number) => base + (Math.random() - 0.5) * range;
+
   const stats = [
-    { label: 'TOTAL GENERATION', value: gridData ? `${gridData.total_generation_mw.toFixed(1)} MW` : 'N/A', icon: Zap, color: 'text-emerald-400' },
-    { label: 'FREQUENCY', value: gridData ? `${gridData.frequency_hz.toFixed(2)} Hz` : 'N/A', icon: Activity, color: 'text-blue-400' },
-    { label: 'SYSTEM LOSSES', value: gridData ? `${gridData.total_losses_mw.toFixed(2)} MW` : 'N/A', icon: AlertTriangle, color: 'text-amber-400' },
+    { label: 'UPLINK LATENCY', value: `${Math.round(jitter(42, 8))}ms`, icon: Radio, color: 'text-cyan-400' },
+    { label: 'GLOBAL BANDWIDTH', value: `${jitter(14.2, 1.2).toFixed(1)} Tbps`, icon: Globe, color: 'text-purple-400' },
+    { label: 'ORCHESTRATOR LOAD', value: `${Math.round(jitter(28, 6))}%`, icon: Cpu, color: 'text-pink-400' },
   ];
 
   return (

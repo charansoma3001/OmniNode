@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type SegmentType = 'ZONE 1' | 'ZONE 2' | 'ZONE 3' | 'GLOBAL';
+export type SegmentType = 'ZONE 1' | 'ZONE 2' | 'ZONE 3' | 'GLOBAL' | 'DOMESTIC' | 'OVERSEAS' | 'MARITIME' | 'SPACE';
 
 export interface NetworkNode {
   id: string;
@@ -11,12 +11,7 @@ export interface NetworkNode {
   type: SegmentType;
   status: 'NOMINAL' | 'WARNING' | 'CRITICAL';
   location: { lat: number; lng: number };
-  telemetry: {
-    voltage: string;
-    loadMw: string;
-    genMw: string;
-    frequency: string;
-  };
+  telemetry: Record<string, any>;
 }
 
 export interface Agent {

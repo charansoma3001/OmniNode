@@ -3,29 +3,85 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
-import { LayoutGrid, Globe, Ship, Satellite, Users, Activity, ShieldAlert, MessageSquare } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  LayoutGrid, Globe, Ship, Satellite, Users, Activity, ShieldAlert,
+  MessageSquare, ChevronDown, ChevronRight, Cpu, Waves, Network, Radio, Zap, Brain
+} from 'lucide-react';
 import { SegmentType } from '../types';
 
 interface SidebarProps {
-  activeSegment: SegmentType | 'AGENTS' | 'SIGINT';
-  onSegmentChange: (segment: SegmentType | 'AGENTS' | 'SIGINT') => void;
+  activeSegment: SegmentType | 'AGENTS' | 'SIGINT' | 'GEOGRAPHIC' | 'DOMESTIC' | 'MARITIME' | 'SPACE' | 'PIGNN';
+  onSegmentChange: (segment: any) => void;
   onToggleChat?: () => void;
   isChatOpen?: boolean;
 }
 
+interface SidebarGroup {
+  id: string;
+  label: string;
+  icon: React.ElementType;
+  description: string;
+  items: { id: string; icon: React.ElementType; label: string }[];
+}
+
 export const Sidebar: React.FC<SidebarProps> = ({ activeSegment, onSegmentChange, onToggleChat, isChatOpen }) => {
-  const items = [
-    { id: 'ZONE 1', icon: LayoutGrid, label: 'Zone 1 (Core)' },
-    { id: 'ZONE 2', icon: Globe, label: 'Zone 2 (Industrial)' },
-    { id: 'ZONE 3', icon: Activity, label: 'Zone 3 (Residential)' },
-    { id: 'GLOBAL', icon: Globe, label: 'Global Grid View' },
-    { id: 'divider', type: 'divider' },
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['digital-twin']));
+
+  const groups: SidebarGroup[] = [
+    {
+      id: 'digital-twin',
+      label: 'Digital Twin',
+      icon: Cpu,
+      description: 'IEEE 30-Bus Power Grid + PI-GNN',
+      items: [
+        { id: 'ZONE 1', icon: LayoutGrid, label: 'Zone 1 — Core Hub' },
+        { id: 'ZONE 2', icon: Network, label: 'Zone 2 — Industrial' },
+        { id: 'ZONE 3', icon: Activity, label: 'Zone 3 — Residential' },
+        { id: 'GLOBAL', icon: Globe, label: 'Global Grid View' },
+        { id: 'PIGNN', icon: Brain, label: 'PI-GNN Surrogate' },
+      ],
+    },
+    {
+      id: 'domestic',
+      label: 'Domestic Ground',
+      icon: Radio,
+      description: '11 sensor servers · 5 actuator servers',
+      items: [
+        { id: 'DOMESTIC', icon: Zap, label: 'Ground Stations' },
+        { id: 'GEOGRAPHIC', icon: Globe, label: 'Coverage Map' },
+      ],
+    },
+    {
+      id: 'maritime-space',
+      label: 'Maritime + Space',
+      icon: Satellite,
+      description: 'Ocean corridors · Satellite relays',
+      items: [
+        { id: 'MARITIME', icon: Ship, label: 'Maritime Corridor' },
+        { id: 'SPACE', icon: Satellite, label: 'Space Segment' },
+      ],
+    },
+  ];
+
+  const systemItems = [
     { id: 'AGENTS', icon: Users, label: 'Agent Orchestrator' },
     { id: 'SIGINT', icon: ShieldAlert, label: 'Guardian Intercept' },
-    { id: 'divider2', type: 'divider' },
     { id: 'CHAT', icon: MessageSquare, label: 'AI Analyst' },
   ];
+
+  const toggleGroup = (groupId: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  };
+
+  // Check if any child in a group is active
+  const groupIsActive = (group: SidebarGroup) =>
+    group.items.some(item => activeSegment === item.id);
 
   return (
     <nav className="w-64 bg-[#0a0a0c] border-r border-[#1e1e24] flex flex-col h-full">
@@ -41,21 +97,82 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSegment, onSegmentChange
         </div>
       </div>
 
-      <div className="flex-1 py-4 overflow-y-auto">
-        {items.map((item, idx) => {
-          if (item.type === 'divider') {
-            return <div key={idx} className="my-4 mx-6 border-t border-[#1e1e24]" />;
-          }
+      <div className="flex-1 py-2 overflow-y-auto">
+        {/* Section label */}
+        <div className="px-6 pt-3 pb-1">
+          <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-zinc-600">Domains</span>
+        </div>
 
-          const Icon = item.icon!;
+        {/* Collapsible domain groups */}
+        {groups.map(group => {
+          const isExpanded = expandedGroups.has(group.id);
+          const isGroupActive = groupIsActive(group);
+          const GroupIcon = group.icon;
+
+          return (
+            <div key={group.id} className="mb-0.5">
+              {/* Group header */}
+              <button
+                onClick={() => toggleGroup(group.id)}
+                className={`w-full flex items-center gap-2.5 px-5 py-2 text-left transition-colors group
+                  ${isGroupActive ? 'text-emerald-400' : 'text-zinc-400 hover:text-zinc-200'}`}
+              >
+                {isExpanded
+                  ? <ChevronDown className="w-3 h-3 text-zinc-600" />
+                  : <ChevronRight className="w-3 h-3 text-zinc-600" />
+                }
+                <GroupIcon className={`w-4 h-4 ${isGroupActive ? 'text-emerald-400' : 'text-zinc-500'}`} />
+                <div className="flex-1 min-w-0">
+                  <span className="text-[11px] font-semibold tracking-tight block">{group.label}</span>
+                  <span className="text-[8px] font-mono text-zinc-600 block truncate">{group.description}</span>
+                </div>
+              </button>
+
+              {/* Expanded children */}
+              {isExpanded && (
+                <div className="ml-3">
+                  {group.items.map(item => {
+                    const Icon = item.icon;
+                    const isActive = activeSegment === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => onSegmentChange(item.id)}
+                        className={`w-full flex items-center gap-2.5 pl-7 pr-4 py-1.5 text-[11px] transition-all duration-150
+                          ${isActive
+                            ? 'text-emerald-400 bg-emerald-500/5 border-r-2 border-emerald-500'
+                            : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.02]'}`}
+                      >
+                        <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-emerald-400' : 'text-zinc-600'}`} />
+                        <span className="font-medium tracking-tight">{item.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Divider */}
+        <div className="my-3 mx-6 border-t border-[#1e1e24]" />
+
+        {/* Section label */}
+        <div className="px-6 pb-1">
+          <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-zinc-600">System</span>
+        </div>
+
+        {/* System items */}
+        {systemItems.map(item => {
+          const Icon = item.icon;
           const isChat = item.id === 'CHAT';
           const isActive = isChat ? !!isChatOpen : activeSegment === item.id;
 
           return (
             <button
               key={item.id}
-              onClick={() => isChat ? onToggleChat?.() : onSegmentChange(item.id as any)}
-              className={`w-full flex items-center gap-3 px-6 py-3 text-sm transition-all duration-200 group
+              onClick={() => isChat ? onToggleChat?.() : onSegmentChange(item.id)}
+              className={`w-full flex items-center gap-3 px-6 py-2.5 text-[11px] transition-all duration-200 group
                 ${isActive
                   ? 'text-emerald-400 bg-emerald-500/5 border-r-2 border-emerald-500'
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'}`}
