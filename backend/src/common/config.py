@@ -11,17 +11,20 @@ class Settings(BaseSettings):
     # --- LLM (shared) ---
     llm_api_key: str = "ollama"
     llm_base_url: str = "http://ubuntu:11434"
-    llm_context_window: int = 4096
+    llm_context_window: int = 8192
 
     # --- Multi-Agent Model Assignments ---
     # Strategic agent: the "big brain" for cross-zone reasoning
-    strategic_model: str = "llama3.1:latest"
+    strategic_model: str = "qwen2.5-32k:latest"
     # Per-zone coordinator agents: each zone gets a dedicated model instance
+    zone1_model: str = "granite4:latest"
+    zone2_model: str = "qwen2.5:latest"
+    zone3_model: str = "llama3.2:latest"
     # Safety guardian: validates actuator commands
     guardian_model: str = "llama-guard3:latest"
 
     # Backwards compat alias
-    llm_model: str = "llama3.1:latest"
+    llm_model: str = "qwen2.5-32k:latest"
 
     def get_zone_model(self, zone_id: str) -> str:
         """Return the model name for a specific zone."""

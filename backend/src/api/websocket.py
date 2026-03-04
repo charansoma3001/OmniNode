@@ -21,17 +21,31 @@ router = APIRouter()
 active_agent: StrategicAgent | None = None
 active_grid: PowerGridSimulation | None = None
 
+
+async def _replay_and_stream(websocket: WebSocket, channel: str) -> None:
+    """Replay recent history then stream live events for a channel."""
+    # Replay history so clients that reconnect/refresh see past messages
+    for msg in event_bus.get_history(channel):
+        if isinstance(msg, dict):
+            await websocket.send_json(msg)
+        else:
+            await websocket.send_text(msg)
+
+    # Then stream live events
+    async for message in event_bus.subscribe(channel):
+        if isinstance(message, dict):
+            await websocket.send_json(message)
+        else:
+            await websocket.send_text(message)
+
+
 @router.websocket("/ws/grid_state")
 async def websocket_grid_state(websocket: WebSocket) -> None:
     """Stream real-time grid state updates to the UI."""
     await websocket.accept()
     logger.info("WebSocket connected: /ws/grid_state")
     try:
-        async for message in event_bus.subscribe("grid_state"):
-            if isinstance(message, dict):
-                await websocket.send_json(message)
-            else:
-                await websocket.send_text(message)
+        await _replay_and_stream(websocket, "grid_state")
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected: /ws/grid_state")
     except Exception as e:
@@ -43,11 +57,7 @@ async def websocket_agent_logs(websocket: WebSocket) -> None:
     await websocket.accept()
     logger.info("WebSocket connected: /ws/agent_logs")
     try:
-        async for message in event_bus.subscribe("agent_log"):
-            if isinstance(message, dict):
-                await websocket.send_json(message)
-            else:
-                await websocket.send_text(message)
+        await _replay_and_stream(websocket, "agent_log")
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected: /ws/agent_logs")
     except Exception as e:
@@ -59,11 +69,7 @@ async def websocket_guardian_events(websocket: WebSocket) -> None:
     await websocket.accept()
     logger.info("WebSocket connected: /ws/guardian_events")
     try:
-        async for message in event_bus.subscribe("guardian_event"):
-            if isinstance(message, dict):
-                await websocket.send_json(message)
-            else:
-                await websocket.send_text(message)
+        await _replay_and_stream(websocket, "guardian_event")
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected: /ws/guardian_events")
     except Exception as e:
