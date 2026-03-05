@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef } from 'react';
-import * as d3 from 'd3';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import ForceGraph3D, { ForceGraphMethods } from 'react-force-graph-3d';
+import * as THREE from 'three';
 import { NetworkNode, SegmentType } from '../types';
 
 interface NetworkMapProps {
@@ -13,44 +14,82 @@ interface NetworkMapProps {
   edges?: { from_bus: number; to_bus: number; loading_percent: number }[];
 }
 
-// Persistent position cache – survives across renders so nodes never "explode"
-const positionCache = new Map<string, { x: number; y: number }>();
-let hasInitialized = false;
+// ── Glow sprite texture (generated once) ──
+const createGlowTexture = (): THREE.Texture => {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  gradient.addColorStop(0, 'rgba(255,255,255,0.6)');
+  gradient.addColorStop(0.2, 'rgba(255,255,255,0.3)');
+  gradient.addColorStop(0.5, 'rgba(255,255,255,0.05)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+};
+
+let _glowTexture: THREE.Texture | null = null;
+const getGlowTexture = () => {
+  if (!_glowTexture) _glowTexture = createGlowTexture();
+  return _glowTexture;
+};
+
+// Color helpers
+const STATUS_COLORS: Record<string, { hex: string; three: number }> = {
+  CRITICAL: { hex: '#ef4444', three: 0xef4444 },
+  WARNING: { hex: '#eab308', three: 0xeab308 },
+  NOMINAL: { hex: '#10b981', three: 0x10b981 },
+};
+
+const getStatusColor = (status: string) => STATUS_COLORS[status] || STATUS_COLORS.NOMINAL;
 
 export const NetworkMap: React.FC<NetworkMapProps> = ({ nodes, activeSegment, edges }) => {
-  const svgRef = useRef<SVGSVGElement>(null);
-  const simRef = useRef<d3.Simulation<any, any> | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const fgRef = useRef<ForceGraphMethods>();
+  const [dimensions, setDimensions] = useState({ width: 800, height: 400 });
+  const prevFingerprintRef = useRef<string>('');
+  const hasInitializedRef = useRef(false);
+  const sceneSetupRef = useRef(false);
+  const [graphData, setGraphData] = useState<{ nodes: any[]; links: any[] }>({ nodes: [], links: [] });
 
+  // ── Resize observer ──
   useEffect(() => {
-    if (!svgRef.current || nodes.length === 0) return;
-
-    const width = svgRef.current.clientWidth;
-    const height = svgRef.current.clientHeight;
-    const svg = d3.select(svgRef.current);
-
-    // ── Build data ──
-    const simNodes = nodes.map(n => {
-      const cached = positionCache.get(n.id);
-      return cached
-        ? { ...n, x: cached.x, y: cached.y }
-        : { ...n, x: width / 2 + (Math.random() - 0.5) * 200, y: height / 2 + (Math.random() - 0.5) * 200 };
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      if (width > 0 && height > 0) setDimensions({ width, height });
     });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
 
-    // Build links from real backend edges, or fallback to same-zone connections
-    const links: { source: string; target: string; loading: number }[] = [];
+  // ── Only rebuild graphData when topology changes ──
+  useEffect(() => {
+    const nodeIds = nodes.map(n => n.id).sort().join(',');
+    const edgeIds = edges ? edges.map(e => `${e.from_bus}-${e.to_bus}`).sort().join(',') : '';
+    const fingerprint = `${nodeIds}|${edgeIds}`;
+    if (fingerprint === prevFingerprintRef.current) return;
+    prevFingerprintRef.current = fingerprint;
+
+    const graphNodes = nodes.map(n => ({ ...n, val: 1 }));
+    const links: any[] = [];
+
     if (edges && edges.length > 0) {
       edges.forEach(e => {
         const srcId = `Bus-${e.from_bus}`;
         const tgtId = `Bus-${e.to_bus}`;
-        // Only include links where both nodes exist in current filtered set
-        if (simNodes.find(n => n.id === srcId) && simNodes.find(n => n.id === tgtId)) {
+        if (graphNodes.find(n => n.id === srcId) && graphNodes.find(n => n.id === tgtId)) {
           links.push({ source: srcId, target: tgtId, loading: e.loading_percent });
         }
       });
     } else {
-      // Fallback: connect nodes within same zone (limit connections)
-      const byZone = new Map<string, typeof simNodes>();
-      simNodes.forEach(n => {
+      const byZone = new Map<string, typeof graphNodes>();
+      graphNodes.forEach(n => {
         const arr = byZone.get(n.type) || [];
         arr.push(n);
         byZone.set(n.type, arr);
@@ -62,233 +101,227 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({ nodes, activeSegment, ed
       });
     }
 
-    // ── Only run the physics simulation on first load ──
-    const isFirstLoad = !hasInitialized;
+    setGraphData({ nodes: graphNodes, links });
+  }, [nodes, edges]);
 
-    // Clear previous SVG contents
-    svg.selectAll('*').remove();
+  // ── Live Update: Mutate node properties in place to avoid exploding ──
+  useEffect(() => {
+    if (graphData.nodes.length === 0) return;
 
-    // ── Defs: gradients + glow filter ──
-    const defs = svg.append('defs');
-    const gradients = [
-      { id: 'grad-emerald', color: '#10b981' },
-      { id: 'grad-blue', color: '#3b82f6' },
-      { id: 'grad-amber', color: '#f59e0b' },
-      { id: 'grad-gray', color: '#6b7280' },
-      { id: 'grad-red', color: '#ef4444' },
-      { id: 'grad-yellow', color: '#eab308' },
-    ];
-    gradients.forEach(c => {
-      const g = defs.append('radialGradient').attr('id', c.id).attr('cx', '30%').attr('cy', '30%').attr('r', '70%');
-      g.append('stop').attr('offset', '0%').attr('stop-color', '#fff').attr('stop-opacity', 0.7);
-      g.append('stop').attr('offset', '45%').attr('stop-color', c.color).attr('stop-opacity', 1);
-      g.append('stop').attr('offset', '100%').attr('stop-color', d3.color(c.color)?.darker(2).toString() || '#000').attr('stop-opacity', 1);
-    });
-    const glowFilter = defs.append('filter').attr('id', 'glow').attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%');
-    glowFilter.append('feGaussianBlur').attr('stdDeviation', '4').attr('result', 'blur');
-    glowFilter.append('feComposite').attr('in', 'SourceGraphic').attr('in2', 'blur').attr('operator', 'over');
+    // Map existing graph nodes by ID for fast lookup
+    const graphNodeMap = new Map();
+    graphData.nodes.forEach((gn: any) => graphNodeMap.set(gn.id, gn));
 
-    // ── Container with zoom/pan ──
-    const container = svg.append('g');
-    const zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.2, 5])
-      .on('zoom', (event) => container.attr('transform', event.transform));
-    svg.call(zoomBehavior);
-
-    // ── Draw links ──
-    const linkGroup = container.append('g');
-    const linkSelection = linkGroup.selectAll('g.link')
-      .data(links)
-      .join('g')
-      .attr('class', 'link');
-
-    // Base line (dark)
-    linkSelection.append('line')
-      .attr('stroke', '#1a2332')
-      .attr('stroke-width', 2)
-      .attr('stroke-opacity', 0.8);
-
-    // Animated energy flow overlay
-    linkSelection.append('line')
-      .attr('stroke', (d: any) => d.loading > 80 ? '#ef4444' : '#10b981')
-      .attr('stroke-width', 1.5)
-      .attr('stroke-opacity', 0.6)
-      .attr('stroke-dasharray', '6, 10')
-      .attr('class', 'animate-flow');
-
-    // ── Draw nodes ──
-    const nodeGroup = container.append('g');
-    const nodeSelection = nodeGroup.selectAll('g.node')
-      .data(simNodes)
-      .join('g')
-      .attr('class', 'node')
-      .attr('transform', (d: any) => `translate(${d.x},${d.y})`)
-      .call(d3.drag<SVGGElement, any>()
-        .on('start', (event, d) => {
-          event.sourceEvent.stopPropagation(); // prevent zoom from firing
-          if (simRef.current && !event.active) simRef.current.alphaTarget(0.3).restart();
-          d.fx = d.x; d.fy = d.y;
-        })
-        .on('drag', (event, d) => {
-          d.fx = event.x; d.fy = event.y;
-          d.x = event.x; d.y = event.y;
-          // Move this node visually
-          d3.select(event.sourceEvent.target.closest('.node')).attr('transform', `translate(${d.x},${d.y})`);
-          // Update connected links
-          linkSelection.selectAll('line')
-            .attr('x1', (l: any) => l.source.x)
-            .attr('y1', (l: any) => l.source.y)
-            .attr('x2', (l: any) => l.target.x)
-            .attr('y2', (l: any) => l.target.y);
-        })
-        .on('end', (event, d) => {
-          if (simRef.current && !event.active) simRef.current.alphaTarget(0);
-          d.fx = null; d.fy = null;
-          // Persist dragged position to cache
-          positionCache.set(d.id, { x: d.x, y: d.y });
-        }));
-
-    // Outer glow ring for critical/warning
-    nodeSelection.append('circle')
-      .attr('r', (d: any) => d.status === 'CRITICAL' ? 18 : 0)
-      .attr('fill', 'none')
-      .attr('stroke', '#ef4444')
-      .attr('stroke-width', 1)
-      .attr('stroke-opacity', 0.5)
-      .attr('class', (d: any) => d.status === 'CRITICAL' ? 'animate-ping' : '');
-
-    // Main sphere
-    nodeSelection.append('circle')
-      .attr('r', 7)
-      .attr('fill', (d: any) => {
-        if (d.status === 'CRITICAL') return 'url(#grad-red)';
-        if (d.status === 'WARNING') return 'url(#grad-yellow)';
-        return 'url(#grad-emerald)';
-      })
-      .attr('stroke', (d: any) => d.status === 'CRITICAL' ? '#fca5a5' : '#1e1e24')
-      .attr('stroke-width', 1)
-      .attr('filter', (d: any) => d.status !== 'NOMINAL' ? 'url(#glow)' : '')
-      .attr('cursor', 'pointer');
-
-    // Short bus ID label (always visible)
-    nodeSelection.append('text')
-      .text((d: any) => d.id.replace('Bus-', 'B'))
-      .attr('x', 11)
-      .attr('y', 3)
-      .attr('fill', '#6b7280')
-      .attr('font-size', '8px')
-      .attr('font-family', 'monospace')
-      .attr('pointer-events', 'none');
-
-    // Hover tooltip group (hidden by default)
-    const tooltip = nodeSelection.append('g')
-      .attr('class', 'node-tooltip')
-      .attr('opacity', 0)
-      .attr('pointer-events', 'none');
-
-    tooltip.append('rect')
-      .attr('x', 10)
-      .attr('y', -22)
-      .attr('width', (d: any) => Math.max(d.name.length, 10) * 6.5 + 12)
-      .attr('height', 34)
-      .attr('fill', '#0a0a0c')
-      .attr('fill-opacity', 0.92)
-      .attr('stroke', '#1e1e24')
-      .attr('rx', 4);
-
-    tooltip.append('text')
-      .text((d: any) => d.name)
-      .attr('x', 16)
-      .attr('y', -8)
-      .attr('fill', '#e4e4e7')
-      .attr('font-size', '9px')
-      .attr('font-family', 'monospace');
-
-    tooltip.append('text')
-      .text((d: any) => d.telemetry?.voltage || '')
-      .attr('x', 16)
-      .attr('y', 5)
-      .attr('fill', (d: any) => d.status === 'CRITICAL' ? '#fca5a5' : '#6b7280')
-      .attr('font-size', '8px')
-      .attr('font-family', 'monospace');
-
-    nodeSelection.on('mouseover', function () {
-      d3.select(this).select('.node-tooltip').transition().duration(150).attr('opacity', 1);
-    }).on('mouseout', function () {
-      d3.select(this).select('.node-tooltip').transition().duration(150).attr('opacity', 0);
+    let needsUpdate = false;
+    nodes.forEach(n => {
+      const gNode = graphNodeMap.get(n.id);
+      if (gNode) {
+        if (gNode.status !== n.status || JSON.stringify(gNode.telemetry) !== JSON.stringify(n.telemetry)) {
+          gNode.status = n.status;
+          gNode.telemetry = n.telemetry;
+          needsUpdate = true;
+        }
+      }
     });
 
-    // ── Tick function ──
-    const tick = () => {
-      linkSelection.selectAll('line')
-        .attr('x1', (d: any) => d.source.x)
-        .attr('y1', (d: any) => d.source.y)
-        .attr('x2', (d: any) => d.target.x)
-        .attr('y2', (d: any) => d.target.y);
-
-      nodeSelection.attr('transform', (d: any) => `translate(${d.x},${d.y})`);
-    };
-
-    if (isFirstLoad) {
-      // Full simulation on first load – spread out generously
-      const sim = d3.forceSimulation(simNodes as any)
-        .force('link', d3.forceLink(links).id((d: any) => d.id).distance(160))
-        .force('charge', d3.forceManyBody().strength(-250))
-        .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide().radius(55))
-        .on('tick', tick)
-        .on('end', () => {
-          // Cache final positions for all future renders
-          simNodes.forEach((n: any) => positionCache.set(n.id, { x: n.x, y: n.y }));
-        });
-
-      simRef.current = sim;
-      hasInitialized = true;
-
-      return () => { sim.stop(); };
-    } else {
-      // Subsequent renders: just use cached positions, no physics
-      // Resolve link references manually
-      const nodeById = new Map(simNodes.map(n => [n.id, n]));
-      links.forEach((l: any) => {
-        if (typeof l.source === 'string') l.source = nodeById.get(l.source) || l.source;
-        if (typeof l.target === 'string') l.target = nodeById.get(l.target) || l.target;
-      });
-
-      // Update positions from cache and re-render
-      tick();
-
-      // Cache any new nodes
-      simNodes.forEach((n: any) => positionCache.set(n.id, { x: n.x, y: n.y }));
+    if (needsUpdate && fgRef.current) {
+      // Tell force graph to re-evaluate node visuals without touching topology/physics
+      fgRef.current.refresh();
     }
-  }, [nodes, activeSegment, edges]);
+  }, [nodes, graphData]);
+
+  // ── Configure forces + scene enhancements once ──
+  useEffect(() => {
+    if (!fgRef.current || graphData.nodes.length === 0 || hasInitializedRef.current) return;
+    hasInitializedRef.current = true;
+
+    // Push nodes further apart so they aren't hidden/packed
+    fgRef.current.d3Force('charge')?.strength(-90);
+    fgRef.current.d3Force('link')?.distance(40);
+
+    setTimeout(() => fgRef.current?.zoomToFit(800, 50), 600);
+  }, [graphData]);
+
+  // ── Scene setup: starfield, fog, lighting ──
+  useEffect(() => {
+    if (!fgRef.current || sceneSetupRef.current) return;
+    const scene = fgRef.current.scene();
+    if (!scene) return;
+    sceneSetupRef.current = true;
+
+    // Starfield particles
+    const starCount = 2000;
+    const starGeometry = new THREE.BufferGeometry();
+    const starPositions = new Float32Array(starCount * 3);
+    for (let i = 0; i < starCount; i++) {
+      starPositions[i * 3] = (Math.random() - 0.5) * 1200;
+      starPositions[i * 3 + 1] = (Math.random() - 0.5) * 1200;
+      starPositions[i * 3 + 2] = (Math.random() - 0.5) * 1200;
+    }
+    starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+
+    const starMaterial = new THREE.PointsMaterial({
+      color: 0x4488aa,
+      size: 0.6,
+      transparent: true,
+      opacity: 0.5,
+      sizeAttenuation: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    scene.add(new THREE.Points(starGeometry, starMaterial));
+
+    // Grid plane for depth
+    const gridHelper = new THREE.GridHelper(400, 40, 0x111122, 0x0a0a18);
+    gridHelper.position.y = -80;
+    (gridHelper.material as THREE.Material).transparent = true;
+    (gridHelper.material as THREE.Material).opacity = 0.15;
+    scene.add(gridHelper);
+
+    // Fog for depth (reduced so distant nodes don't completely hide)
+    scene.fog = new THREE.FogExp2(0x050508, 0.0005);
+
+    // Lighting
+    scene.add(new THREE.AmbientLight(0x222244, 0.6));
+    const dirLight = new THREE.DirectionalLight(0x6688cc, 0.8);
+    dirLight.position.set(100, 200, 100);
+    scene.add(dirLight);
+    const pointLight = new THREE.PointLight(0x10b981, 1.5, 300);
+    pointLight.position.set(0, 50, 0);
+    scene.add(pointLight);
+  }, [graphData]);
+
+  // ── Custom node rendering ──
+  const nodeThreeObject = useCallback((node: any) => {
+    const { three: colorVal, hex } = getStatusColor(node.status);
+    const group = new THREE.Group();
+
+    // Core sphere (Basic material so it ignores lighting/shadows and always glows bright)
+    const sphere = new THREE.Mesh(
+      new THREE.SphereGeometry(3, 24, 24),
+      new THREE.MeshBasicMaterial({
+        color: colorVal,
+        transparent: true,
+        opacity: 0.95,
+      })
+    );
+    group.add(sphere);
+
+    // Inner bright core
+    group.add(new THREE.Mesh(
+      new THREE.SphereGeometry(1.2, 16, 16),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7 })
+    ));
+
+    // Glow halo sprite (bumped opacity for more pop)
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: getGlowTexture(),
+      color: colorVal,
+      transparent: true,
+      opacity: node.status === 'CRITICAL' ? 0.9 : 0.6,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.scale.set(18, 18, 1);
+    group.add(sprite);
+
+    // Orbital ring for Zone 1/2 nodes
+    if (node.type === 'ZONE 1' || node.type === 'ZONE 2') {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(4.5, 5, 32),
+        new THREE.MeshBasicMaterial({ color: colorVal, transparent: true, opacity: 0.6, side: THREE.DoubleSide })
+      );
+      ring.rotation.x = Math.PI / 2;
+      group.add(ring);
+    }
+
+    // Floating label (Text)
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 32;
+    const ctx = canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = 'bold 22px monospace';
+    ctx.fillStyle = hex;
+    ctx.textAlign = 'center';
+    ctx.fillText(node.id.replace('Bus-', 'B'), 64, 24);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+
+    const labelSprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false,
+        blending: THREE.NormalBlending
+      })
+    );
+    labelSprite.scale.set(16, 4, 1);
+    labelSprite.position.set(0, 8, 0);
+    group.add(labelSprite);
+
+    return group;
+  }, []);
 
   return (
-    <div className="w-full h-full bg-[#0a0a0c] relative overflow-hidden">
-      <div className="absolute top-4 left-4 z-10 flex flex-col gap-1.5">
-        <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest mb-1">Power Grid Topology</div>
+    <div className="w-full h-full bg-[#050508] relative overflow-hidden" ref={containerRef}>
+      {/* Vignette overlay */}
+      <div className="absolute inset-0 z-[1] pointer-events-none"
+        style={{ background: 'radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.6) 100%)' }}
+      />
+
+      {/* Legend Overlay */}
+      <div className="absolute top-4 left-4 z-10 flex flex-col gap-1.5 pointer-events-none">
+        <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest mb-1">Power Grid Topology (3D)</div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full" style={{ background: 'radial-gradient(circle at 30% 30%, #fff, #10b981, #065f46)' }} />
+          <div className="w-3 h-3 rounded-full" style={{ background: 'radial-gradient(circle at 30% 30%, #fff, #10b981, #065f46)', boxShadow: '0 0 8px #10b981' }} />
           <span className="text-[10px] font-mono text-zinc-400">Nominal</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full" style={{ background: 'radial-gradient(circle at 30% 30%, #fff, #eab308, #854d0e)' }} />
+          <div className="w-3 h-3 rounded-full" style={{ background: 'radial-gradient(circle at 30% 30%, #fff, #eab308, #854d0e)', boxShadow: '0 0 8px #eab308' }} />
           <span className="text-[10px] font-mono text-zinc-400">Warning (V ±5%)</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full" style={{ background: 'radial-gradient(circle at 30% 30%, #fff, #ef4444, #7f1d1d)' }} />
+          <div className="w-3 h-3 rounded-full" style={{ background: 'radial-gradient(circle at 30% 30%, #fff, #ef4444, #7f1d1d)', boxShadow: '0 0 8px #ef4444' }} />
           <span className="text-[10px] font-mono text-zinc-400">Critical (V ±10%)</span>
         </div>
-        <div className="flex items-center gap-2 mt-1">
-          <div className="w-6 h-0.5 bg-emerald-500 animate-flow" style={{ backgroundImage: 'repeating-linear-gradient(90deg, #10b981 0 4px, transparent 4px 10px)' }} />
-          <span className="text-[10px] font-mono text-zinc-400">Energy Flow</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-0.5 bg-red-500" style={{ backgroundImage: 'repeating-linear-gradient(90deg, #ef4444 0 4px, transparent 4px 10px)' }} />
-          <span className="text-[10px] font-mono text-zinc-400">Overloaded Line</span>
+        <div className="text-[9px] font-mono text-zinc-600 mt-2">
+          Drag to Rotate · Scroll to Zoom · Click Node to Focus
         </div>
       </div>
-      <svg ref={svgRef} className="w-full h-full" />
+
+      <div className="absolute inset-0">
+        <ForceGraph3D
+          ref={fgRef}
+          width={dimensions.width}
+          height={dimensions.height}
+          graphData={graphData}
+          nodeId="id"
+          nodeThreeObject={nodeThreeObject}
+          nodeThreeObjectExtend={false}
+          nodeLabel={(n: any) => `<div style="background:rgba(0,0,0,0.85);border:1px solid ${getStatusColor(n.status).hex};padding:6px 10px;border-radius:6px;font-family:monospace;font-size:11px;color:#e4e4e7;line-height:1.5;backdrop-filter:blur(8px)"><b style="color:${getStatusColor(n.status).hex}">${n.name}</b><br/>V: ${n.telemetry?.voltage || 'N/A'}</div>`}
+          linkDirectionalParticles={(l: any) => l.loading > 20 ? 4 : 1}
+          linkDirectionalParticleWidth={1.5}
+          linkDirectionalParticleSpeed={0.006}
+          linkDirectionalParticleColor={(l: any) => l.loading > 80 ? '#fca5a5' : '#6ee7b7'}
+          backgroundColor="rgba(0,0,0,0)"
+          enableNodeDrag={false}
+          onNodeClick={(node: any) => {
+            const distance = 80;
+            const distRatio = 1 + distance / Math.hypot(node.x, node.y, node.z);
+            if (fgRef.current) {
+              fgRef.current.cameraPosition(
+                { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
+                node,
+                1000
+              );
+            }
+          }}
+        />
+      </div>
     </div>
   );
 };
