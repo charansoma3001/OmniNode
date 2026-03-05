@@ -1,0 +1,5 @@
+{
+  "name": "G-TT&C Mission Control",
+  "description": "Global Telemetry, Tracking, and Control Network with an integrated agentic orchestration layer for physical systems.",
+  "requestFramePermissions": []
+}

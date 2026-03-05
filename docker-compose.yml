@@ -3,9 +3,9 @@ services:
     image: emqx/emqx:5.8
     container_name: mcp-emqx
     ports:
-      - "1883:1883"     # MQTT
-      - "8083:8083"     # MQTT WebSocket
-      - "18083:18083"   # EMQX Dashboard
+      - "1883:1883" # MQTT
+      - "8083:8083" # MQTT WebSocket
+      - "18083:18083" # EMQX Dashboard
     environment:
       EMQX_NAME: mcp-broker
       EMQX_LOADED_PLUGINS: "emqx_dashboard"
@@ -14,7 +14,7 @@ services:
     networks:
       - mcp-net
     healthcheck:
-      test: ["CMD", "emqx", "ctl", "status"]
+      test: [ "CMD", "emqx", "ctl", "status" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -36,7 +36,7 @@ services:
     networks:
       - mcp-net
     healthcheck:
-      test: ["CMD", "influx", "ping"]
+      test: [ "CMD", "influx", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -45,7 +45,7 @@ services:
     image: grafana/grafana:11.2.0
     container_name: mcp-grafana
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: mcp-grafana
@@ -61,6 +61,7 @@ volumes:
   emqx_data:
   influxdb_data:
   grafana_data:
+
 
 networks:
   mcp-net:

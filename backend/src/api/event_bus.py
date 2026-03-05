@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import AsyncGenerator
 
 logger = logging.getLogger(__name__)
+
+# Max number of recent messages to keep per channel for replay on reconnect
+_HISTORY_SIZE = 100
+
 
 class EventBus:
     """Singleton event bus for pub/sub communication."""
@@ -18,6 +22,7 @@ class EventBus:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._channels = defaultdict(list)
+            cls._instance._history: dict[str, deque] = defaultdict(lambda: deque(maxlen=_HISTORY_SIZE))
             cls._instance._lock = asyncio.Lock()
         return cls._instance
         
@@ -30,6 +35,9 @@ class EventBus:
         if isinstance(message, dict) and "timestamp" not in message:
             from datetime import datetime
             message["timestamp"] = datetime.now().isoformat()
+
+        # Store in history ring buffer
+        self._instance._history[channel].append(message)
             
         async with self._instance._lock:
             queues = self._instance._channels[channel][:] # Copy the list of queues
@@ -43,6 +51,10 @@ class EventBus:
                 queue.put_nowait(message)
             except asyncio.QueueFull:
                 logger.warning(f"Subscriber queue for channel '{channel}' is full. Dropping message.")
+
+    def get_history(self, channel: str) -> list[dict | str]:
+        """Return recent messages for a channel (for replay on reconnect)."""
+        return list(self._instance._history[channel])
 
     async def subscribe(self, channel: str) -> AsyncGenerator[dict | str, None]:
         """Subscribe to a channel and yield messages as they arrive."""
