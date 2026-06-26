@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+# Repo root = backend/src/common/config.py -> parents[3]
+_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
@@ -58,7 +63,8 @@ class Settings(BaseSettings):
     monitor_interval_seconds: int = 5
 
     model_config = {
-        "env_file": ".env",
+        # Resolve the root .env regardless of cwd; a backend-local .env (if any) wins.
+        "env_file": (str(_ROOT / ".env"), ".env"),
         "env_file_encoding": "utf-8",
         "extra": "ignore"
     }

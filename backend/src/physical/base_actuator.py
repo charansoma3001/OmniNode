@@ -248,10 +248,35 @@ class BaseActuatorServer(ABC):
     # ------------------------------------------------------------------
 
     def get_registration(self) -> MCPServerRegistration:
+        # Advertise real parameter schemas so the strategic LLM knows to pass a
+        # device_id/action and which exact values are valid (prevents empty-arg
+        # calls that previously parsed to device id -1).
+        device_ids = self._get_device_ids()
+        valid_actions = getattr(self, "_valid_actions", None)
+        device_prop: dict = {"type": "string", "description": f"Target {self.device_type} device ID"}
+        if device_ids:
+            device_prop["enum"] = device_ids
+        action_prop: dict = {"type": "string", "description": "Action to perform"}
+        if valid_actions:
+            action_prop["enum"] = list(valid_actions)
+        control_schema = {
+            "type": "object",
+            "properties": {
+                "device_id": device_prop,
+                "action": action_prop,
+                "parameters": {"type": "object", "description": "Action parameters, e.g. {'p_mw': 50.0}"},
+            },
+            "required": ["device_id", "action"],
+        }
+        status_schema = {
+            "type": "object",
+            "properties": {"device_id": dict(device_prop)},
+            "required": ["device_id"],
+        }
         tools = [
-            ToolDescriptor(name="control", description=f"Control {self.device_type}", safety_level=SafetyLevel.MEDIUM_RISK),
-            ToolDescriptor(name="validate_action", description=f"Validate {self.device_type} action", safety_level=SafetyLevel.READ_ONLY),
-            ToolDescriptor(name="get_status", description=f"Get {self.device_type} status", safety_level=SafetyLevel.READ_ONLY),
+            ToolDescriptor(name="control", description=f"Control {self.device_type}", safety_level=SafetyLevel.MEDIUM_RISK, input_schema=control_schema),
+            ToolDescriptor(name="validate_action", description=f"Validate {self.device_type} action", safety_level=SafetyLevel.READ_ONLY, input_schema=control_schema),
+            ToolDescriptor(name="get_status", description=f"Get {self.device_type} status", safety_level=SafetyLevel.READ_ONLY, input_schema=status_schema),
             ToolDescriptor(name="list_devices", description=f"List {self.device_type} devices", safety_level=SafetyLevel.READ_ONLY),
             ToolDescriptor(name="emergency_shutdown", description="Emergency zone shutdown", safety_level=SafetyLevel.EMERGENCY),
         ]

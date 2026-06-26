@@ -235,6 +235,17 @@ class StrategicAgent:
                 return server._emergency_island(arguments.get("reason", ""))
             elif tool_name == "detect_violations":
                 return server._detect_violations()
+            elif tool_name == "execute_safety_rules":
+                return server._evaluate_safety_rules()
+            elif tool_name == "update_protection_settings":
+                server.protection_settings.update(
+                    {k: v for k, v in arguments.items() if v is not None}
+                )
+                server.audit_log.log_event(
+                    server.zone_id, "SETTINGS_UPDATED",
+                    "Protection thresholds revised", details=server.protection_settings,
+                )
+                return {"status": "success", "settings": server.protection_settings}
             elif tool_name == "analyze_and_act":
                 # THIS triggers the zone's own LLM!
                 return server._llm_analyze(arguments.get("situation", ""))
@@ -254,7 +265,16 @@ class StrategicAgent:
 
         # ---- Actuator ----
         if hasattr(server, "device_type"):
+            # Resolve and validate the device_id up front. An empty or invalid id
+            # would otherwise parse to gen/load id -1, causing KeyError on reads and
+            # phantom NaN-bus rows on writes (which break the subsequent power flow).
+            valid_ids = server._get_device_ids()
+            raw_dev = arguments.get("device_id", "")
+            dev = str(raw_dev.get("id", raw_dev) if isinstance(raw_dev, dict) else raw_dev)
+
             if tool_name == "control":
+                if not dev or dev not in valid_ids:
+                    return {"error": f"control requires a valid device_id. Valid IDs: {valid_ids}"}
                 if self.guardian:
                     # Run safety validation (which also publishes the event to UI)
                     validation = await self.guardian.validate_command(arguments)
@@ -267,11 +287,24 @@ class StrategicAgent:
                         }
                 return server._handle_control(arguments)
             elif tool_name == "validate_action":
+                if not dev or dev not in valid_ids:
+                    return {"error": f"validate_action requires a valid device_id. Valid IDs: {valid_ids}"}
                 return server._handle_validate(arguments)
             elif tool_name == "get_status":
-                return server._get_device_status(arguments.get("device_id", ""))
+                if not dev:
+                    # No device specified → return status of every device.
+                    statuses = []
+                    for d in valid_ids:
+                        try:
+                            statuses.append(server._get_device_status(d))
+                        except Exception as ex:
+                            statuses.append({"device_id": d, "error": str(ex)})
+                    return {"devices": statuses, "type": server.device_type}
+                if dev not in valid_ids:
+                    return {"error": f"Unknown device_id '{dev}'. Valid IDs: {valid_ids}"}
+                return server._get_device_status(dev)
             elif tool_name == "list_devices":
-                return {"devices": server._get_device_ids(), "type": server.device_type, "zone": server.zone}
+                return {"devices": valid_ids, "type": server.device_type, "zone": server.zone}
             elif tool_name == "emergency_shutdown":
                 return server._handle_emergency(arguments.get("zone_id", ""))
 

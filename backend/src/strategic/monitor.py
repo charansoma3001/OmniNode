@@ -269,9 +269,11 @@ class MonitoringLoop:
                 "2. If no lines are tripped, SHED at least 40% of all load immediately."
             )
 
-        # Count violation types using correct ViolationEvent field names
-        low_v  = [v for v in violations if "low"     in v.violation_type]
-        high_v = [v for v in violations if "high"    in v.violation_type]
+        # Count violation types. Voltage violations all carry violation_type="voltage";
+        # low vs. high is distinguished by whether the measured value is below or above
+        # its limit (low limit=0.95, high limit=1.05).
+        low_v  = [v for v in violations if v.violation_type == "voltage" and v.current_value < v.limit_value]
+        high_v = [v for v in violations if v.violation_type == "voltage" and v.current_value > v.limit_value]
         thermal = [v for v in violations if "thermal" in v.violation_type]
 
         def _bus(v: ViolationEvent) -> str:
